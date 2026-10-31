@@ -1,0 +1,127 @@
+/** @file
+  Core System Resource Table: the resource groups Windows loads HAL
+  extensions for.
+
+  One group, VendorId 'SAMS' / DeviceId 0x5420, for the MCT timer extension
+  (NtHalExts halextmct).  Windows looks the extension up in
+  HKLM\SYSTEM\CurrentControlSet\Control\OSExtensionDatabase\VEN_SAMS&DEV_5420
+  (value HALExtension = "halextmct.dll").
+
+  halextmct is SoC independent; everything it needs about this MCT is in
+  the group (layout shared with halextmct.c):
+    - shared info: version 1, the OS log ring (ExynosOsLog.h) for its
+      breadcrumbs,
+    - a timer descriptor (Type 2 / Subtype 0): MCT base, size, counter
+      frequency, GSI of global comparator 0.
+
+  SPDX-License-Identifier: BSD-2-Clause-Patent
+**/
+
+#include <Library/AcpiLib.h>
+#include <Library/PcdLib.h>
+#include <ExynosOsLog.h>
+#include "Platform.h"
+
+#define EFI_ACPI_CSRT_REVISION  0
+
+#define CSRT_RD_TYPE_TIMER     2
+#define CSRT_RD_SUBTYPE_TIMER  0
+
+#pragma pack (1)
+//
+// Microsoft CSRT specification; same layouts as CSRT_RESOURCE_GROUP_HEADER
+// and CSRT_RESOURCE_DESCRIPTOR_HEADER in the Windows DDK acpitabl.h.
+//
+typedef struct {
+  UINT32  Length;
+  UINT32  VendorId;
+  UINT32  SubvendorId;
+  UINT16  DeviceId;
+  UINT16  SubdeviceId;
+  UINT16  Revision;
+  UINT16  Reserved;
+  UINT32  SharedInfoLength;
+} EXYNOS_CSRT_RESOURCE_GROUP_HEADER;
+
+typedef struct {
+  UINT32  Length;
+  UINT16  Type;
+  UINT16  Subtype;
+  UINT32  Uid;
+} EXYNOS_CSRT_RESOURCE_DESCRIPTOR_HEADER;
+
+//
+// halextmct: MCT_CSRT_SHARED_INFO and MCT_CSRT_TIMER.
+//
+typedef struct {
+  UINT32  Version;
+  UINT32  OsLogBase;
+  UINT32  OsLogSize;
+} EXYNOS_MCT_SHARED_INFO;
+
+typedef struct {
+  EXYNOS_CSRT_RESOURCE_DESCRIPTOR_HEADER  Header;
+  UINT32                                  BaseAddress;
+  UINT32                                  Size;
+  UINT32                                  Frequency;
+  UINT32                                  ComparatorGsi;
+} EXYNOS_MCT_TIMER_DESCRIPTOR;
+
+typedef struct {
+  EXYNOS_CSRT_RESOURCE_GROUP_HEADER  Header;
+  EXYNOS_MCT_SHARED_INFO             SharedInfo;
+  EXYNOS_MCT_TIMER_DESCRIPTOR        Timer;
+} EXYNOS_CSRT_MCT_GROUP;
+
+typedef struct {
+  EFI_ACPI_DESCRIPTION_HEADER  Header;
+  EXYNOS_CSRT_MCT_GROUP        Mct;
+} EXYNOS_CSRT;
+#pragma pack ()
+
+EXYNOS_CSRT  Csrt = {
+  EXYNOS_ACPI_HEADER (EFI_ACPI_5_0_CORE_SYSTEM_RESOURCE_TABLE_SIGNATURE,
+                      EXYNOS_CSRT,
+                      EFI_ACPI_CSRT_REVISION),
+  {
+    {
+      sizeof (EXYNOS_CSRT_MCT_GROUP),         // Length
+      SIGNATURE_32 ('S', 'A', 'M', 'S'),      // VendorId
+      0,                                      // SubvendorId
+      0x5420,                                 // DeviceId
+      0,                                      // SubdeviceId
+      0,                                      // Revision
+      0,                                      // Reserved
+      sizeof (EXYNOS_MCT_SHARED_INFO)         // SharedInfoLength
+    },
+    {
+      1,                                      // Version
+      OS_LOG_BASE,
+      OS_LOG_SIZE
+    },
+    {
+      {
+        sizeof (EXYNOS_MCT_TIMER_DESCRIPTOR),
+        CSRT_RD_TYPE_TIMER,
+        CSRT_RD_SUBTYPE_TIMER,
+        0                                     // Uid
+      },
+      EXYNOS_MCT_BASE,
+      EXYNOS_MCT_SIZE,
+      EXYNOS_MCT_FREQUENCY,
+      EXYNOS_MCT_G0_GSI
+    }
+  }
+};
+
+//
+// Linker entry point.  A function, not a pointer variable: a pointer would be
+// placed in the data section ahead of the table and GenFw would emit it too.
+//
+VOID *
+ReferenceAcpiTable (
+  VOID
+  )
+{
+  return &Csrt;
+}

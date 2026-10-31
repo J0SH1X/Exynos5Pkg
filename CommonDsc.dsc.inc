@@ -221,7 +221,7 @@
   # AARCH64), and IDs for the RSDP/XSDT that AcpiTableDxe builds itself.
   gEfiMdeModulePkgTokenSpaceGuid.PcdAcpiExposedTableVersions|0x20
   gEfiMdeModulePkgTokenSpaceGuid.PcdAcpiDefaultOemId|"SAMSNG"
-  gEfiMdeModulePkgTokenSpaceGuid.PcdAcpiDefaultOemTableId|0x2030313234595845
+  gEfiMdeModulePkgTokenSpaceGuid.PcdAcpiDefaultOemTableId|0x2030323435595845   # "EXY5420 "
   gEfiMdeModulePkgTokenSpaceGuid.PcdAcpiDefaultOemRevision|0x00000001
   gEfiMdeModulePkgTokenSpaceGuid.PcdAcpiDefaultCreatorId|0x324B4445
   gEfiMdeModulePkgTokenSpaceGuid.PcdAcpiDefaultCreatorRevision|0x00000001

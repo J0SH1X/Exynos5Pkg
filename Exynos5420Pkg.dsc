@@ -93,6 +93,13 @@
   Exynos5420Pkg/Application/TouchTestApp/TouchTestApp.inf
 
   #
+  # ACPI for Windows: FADT, MADT, empty DSDT, CSRT (MCT timer HAL extension).
+  #
+  MdeModulePkg/Universal/Acpi/AcpiTableDxe/AcpiTableDxe.inf
+  MdeModulePkg/Universal/Acpi/AcpiPlatformDxe/AcpiPlatformDxe.inf
+  Exynos5420Pkg/AcpiTables/AcpiTables.inf
+
+  #
   # Storage: eMMC (dw_mmc ch0) + microSD (dw_mmc ch2, only when the card-detect
   # pin reports a card), then the disk stack (partition + FAT) on BlockIo.
   #
