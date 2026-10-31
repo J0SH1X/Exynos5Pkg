@@ -1,0 +1,43 @@
+#
+#  v1awifi (SM-P900) touchscreen (Atmel mXT1664S) and S Pen (Wacom G9PLL)
+#  as one EFI_ABSOLUTE_POINTER_PROTOCOL.
+#
+#  SPDX-License-Identifier: BSD-2-Clause-Patent
+#
+
+[Defines]
+  INF_VERSION    = 0x00010005
+  BASE_NAME      = Exynos5420TouchDxe
+  FILE_GUID      = 3c1f7e21-6a4d-4b0c-9c33-54201220c00d
+  MODULE_TYPE    = DXE_DRIVER
+  VERSION_STRING = 1.0
+
+  ENTRY_POINT    = TouchDxeInitialize
+
+[Sources.common]
+  TouchDxe.c
+  TouchDxe.h
+  MxtTouch.c
+  WacomPen.c
+
+[Packages]
+  ArmPkg/ArmPkg.dec
+  EmbeddedPkg/EmbeddedPkg.dec
+  MdePkg/MdePkg.dec
+  Exynos5420Pkg/Exynos5420Pkg.dec
+
+[LibraryClasses]
+  BaseMemoryLib
+  DebugLib
+  MemoryAllocationLib
+  UefiBootServicesTableLib
+  UefiDriverEntryPoint
+
+[Protocols]
+  gEfiAbsolutePointerProtocolGuid
+  gExynosGpioProtocolGuid
+  gExynosI2cProtocolGuid
+
+[Depex]
+  gExynosGpioProtocolGuid AND
+  gExynosI2cProtocolGuid

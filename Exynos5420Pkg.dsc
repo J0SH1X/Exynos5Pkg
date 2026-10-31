@@ -82,6 +82,17 @@
   Exynos5420Pkg/Drivers/KeypadDxe/KeypadDxe.inf
 
   #
+  # Touchscreen (mXT1664S, I2C0) + S Pen (Wacom G9PLL, hs-i2c4) as one
+  # EFI_ABSOLUTE_POINTER_PROTOCOL.
+  #
+  Exynos5420Pkg/Drivers/TouchDxe/TouchDxe.inf
+
+  #
+  # Touch test app (not in the FD: copy TouchTest.efi to a FAT volume).
+  #
+  Exynos5420Pkg/Application/TouchTestApp/TouchTestApp.inf
+
+  #
   # Storage: eMMC (dw_mmc ch0) + microSD (dw_mmc ch2, only when the card-detect
   # pin reports a card), then the disk stack (partition + FAT) on BlockIo.
   #
