@@ -1,8 +1,9 @@
 /** @file
   Exynos5420 I2C DXE driver.
 
-  Polling master for the s3c2410-style I2C controllers at
-  0x12C60000 + Bus * 0x10000 (EXYNOS5_PA_IIC(x) in map.h; buses 0..3).
+  Buses 4..10 are the high-speed I2C channels 0..6 (HsI2c.c).  Buses 0..3:
+  polling master for the s3c2410-style I2C controllers at
+  0x12C60000 + Bus * 0x10000 (EXYNOS5_PA_IIC(x) in map.h).
   Register flow follows u-boot's s3c24x0_i2c.c (drivers/i2c/
   s3c24x0_i2c.c): poll IICCON's interrupt pend bit with a timeout instead
   of taking the interrupt, handle the repeated start between messages
@@ -25,6 +26,8 @@
 #include <Library/UefiBootServicesTableLib.h>
 
 #include <Protocol/ExynosI2c.h>
+
+#include "HsI2c.h"
 
 #define I2C_BASE(Bus)  (0x12C60000 + ((Bus) * 0x10000))
 
@@ -232,6 +235,9 @@ I2cXfer (
 
   if ((Bus >= EXYNOS_I2C_MAX_BUS) || (Msgs == NULL) || (Num <= 0)) {
     return -1;
+  }
+  if (Bus >= EXYNOS_I2C_FIRST_HS_BUS) {
+    return HsI2cXfer (Bus - EXYNOS_I2C_FIRST_HS_BUS, Msgs, Num);
   }
 
   Base = I2C_BASE (Bus);

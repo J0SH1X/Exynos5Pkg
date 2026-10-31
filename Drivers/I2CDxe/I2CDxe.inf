@@ -1,13 +1,14 @@
 #
-#  Exynos4 I2C driver: polling master for the eight s3c2410-style
-#  controllers at 0x13860000 + Bus * 0x10000.
+#  Exynos5420 I2C driver: polling master for the s3c2410-style controllers
+#  (buses 0..3, 0x12C60000 + Bus * 0x10000) and the high-speed I2C
+#  channels 0..6 (buses 4..10).
 #
 #  SPDX-License-Identifier: BSD-2-Clause-Patent
 #
 
 [Defines]
   INF_VERSION    = 0x00010005
-  BASE_NAME      = Exynos441xI2CDxe
+  BASE_NAME      = Exynos5420I2CDxe
   FILE_GUID      = 3c1f7e21-6a4d-4b0c-9c33-2a441220c002
   MODULE_TYPE    = DXE_DRIVER
   VERSION_STRING = 1.0
@@ -16,6 +17,8 @@
 
 [Sources.common]
   I2CDxe.c
+  HsI2c.c
+  HsI2c.h
 
 [Packages]
   MdePkg/MdePkg.dec

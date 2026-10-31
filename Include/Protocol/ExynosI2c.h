@@ -1,10 +1,11 @@
 /** @file
   Exynos I2C protocol.
 
-  The Exynos5420 has four s3c2410-style I2C controllers (bus 0..3) at
-  0x12C60000 + Bus * 0x10000, all clocked by ACLK_66_PERIC (~66 MHz).
-  The hs-i2c controllers at 0x12CA0000+ use a different register model
-  and are not covered here.
+  Bus numbers follow Linux on Exynos5420:
+    0..3   s3c2410-style I2C at 0x12C60000 + Bus * 0x10000
+    4..10  high-speed I2C (exynos5-hs-i2c) channels 0..6
+           (hs-i2c3 = bus 7: MAX77802 PMIC, hs-i2c4 = bus 8: Wacom)
+  All controllers are clocked by ACLK_66_PERIC (~66 MHz).
 
   Modelled on HtcLeoPkg's HtcLeoI2C protocol (Linux-style i2c_msg transfers),
   with the bus number passed per call so one protocol instance covers all
@@ -25,11 +26,10 @@
   }
 
 //
-// Hardware s3c2410-style controllers: bus 0..3 on Exynos5420
-// (0x12C60000 + Bus * 0x10000).  The hs-i2c blocks at 0x12CA0000+ use a
-// different register model and are not covered here.
+// Buses 0..3: s3c2410-style controllers; 4..10: hs-i2c channels 0..6.
 //
-#define EXYNOS_I2C_MAX_BUS  4
+#define EXYNOS_I2C_FIRST_HS_BUS  4
+#define EXYNOS_I2C_MAX_BUS       11
 
 //
 // Linux-style transfer flags.
