@@ -1,0 +1,6 @@
+workspace/
+Artifacts/
+initrd.img
+*.fd
+*.bin
+*.img

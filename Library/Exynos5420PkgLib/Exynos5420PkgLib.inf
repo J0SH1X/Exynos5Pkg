@@ -1,0 +1,47 @@
+#
+#  ArmPlatformLib instance for Exynos5420Pkg.
+#
+#  SPDX-License-Identifier: BSD-2-Clause-Patent
+#
+
+[Defines]
+  INF_VERSION                    = 0x00010019
+  BASE_NAME                      = Exynos5420PkgLib
+  FILE_GUID                      = 3c9f1a7e-2b64-4d18-a3c7-916e42f08811
+  MODULE_TYPE                    = BASE
+  VERSION_STRING                 = 1.0
+  LIBRARY_CLASS                  = ArmPlatformLib
+
+[Packages]
+  ArmPkg/ArmPkg.dec
+  ArmPlatformPkg/ArmPlatformPkg.dec
+  EmbeddedPkg/EmbeddedPkg.dec
+  MdePkg/MdePkg.dec
+  MdeModulePkg/MdeModulePkg.dec
+  Exynos5420Pkg/Exynos5420Pkg.dec
+
+[LibraryClasses]
+  BaseLib
+  ArmLib
+  HobLib
+  IoLib
+  MemoryAllocationLib
+  SerialPortLib
+  FrameBufferConfigLib
+
+[Sources.common]
+  Exynos5420Pkg.c
+  Exynos5420PkgHelper.S
+  Exynos5420PkgMem.c
+
+[FixedPcd]
+  gArmTokenSpaceGuid.PcdArmPrimaryCore
+  gArmTokenSpaceGuid.PcdArmPrimaryCoreMask
+  gArmTokenSpaceGuid.PcdSystemMemoryBase
+  gArmTokenSpaceGuid.PcdSystemMemorySize
+  gArmTokenSpaceGuid.PcdFdBaseAddress
+  gArmTokenSpaceGuid.PcdFdSize
+  gExynos5420PkgTokenSpaceGuid.PcdFrameBufferAddress
+  gExynos5420PkgTokenSpaceGuid.PcdFrameBufferWidth
+  gExynos5420PkgTokenSpaceGuid.PcdFrameBufferHeight
+  gExynos5420PkgTokenSpaceGuid.PcdFrameBufferPixelBpp

@@ -1,0 +1,28 @@
+[Defines]
+  INF_VERSION    = 0x00010005
+  BASE_NAME      = FrameBufferSerialPortLib
+  MODULE_TYPE    = BASE
+  VERSION_STRING = 1.0
+  LIBRARY_CLASS  = SerialPortLib
+
+[Sources.common]
+  FrameBufferSerialPortLib.c
+
+[Packages]
+  MdePkg/MdePkg.dec
+  ArmPkg/ArmPkg.dec
+  Exynos5420Pkg/Exynos5420Pkg.dec
+
+[LibraryClasses]
+  ArmLib
+  PcdLib
+  IoLib
+  HobLib
+  CacheMaintenanceLib
+  FrameBufferConfigLib
+
+[Pcd]
+  gExynos5420PkgTokenSpaceGuid.PcdFrameBufferAddress
+  gExynos5420PkgTokenSpaceGuid.PcdFrameBufferWidth
+  gExynos5420PkgTokenSpaceGuid.PcdFrameBufferHeight
+  gExynos5420PkgTokenSpaceGuid.PcdFrameBufferPixelBpp

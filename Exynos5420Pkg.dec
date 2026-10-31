@@ -1,0 +1,70 @@
+#
+#  Exynos5420Pkg package declaration.
+#
+#  EDK2 port for the Samsung Exynos4 (4210/4212/4410/4412) family,
+#  starting with the Galaxy Note 1 (GT-N7000).
+#
+#  SPDX-License-Identifier: BSD-2-Clause-Patent
+#
+
+[Defines]
+  DEC_SPECIFICATION              = 0x0001001a
+  PACKAGE_NAME                   = Exynos5420Pkg
+  PACKAGE_GUID                   = 3f7f1f3a-8f0e-4c2e-9b6a-52d1c0a7e441
+  PACKAGE_VERSION                = 0.1
+
+[Includes.common]
+  Include
+
+[LibraryClasses.common]
+  ##  @libraryclass  Decompress .xz streams (XZ Embedded).
+  XzDecLib|Include/Library/XzDecLib.h
+
+[Guids.common]
+  gExynos5420PkgTokenSpaceGuid   = { 0x7f1c441a, 0x5b2e, 0x4d18, { 0xa3, 0xc7, 0x91, 0x6e, 0x42, 0xf0, 0x88, 0x11 } }
+
+[Protocols.common]
+  # Exynos4 GPIO banks (Get/Set/Config over CON/DAT/PULL registers).
+  gExynosGpioProtocolGuid        = { 0x9d3f4a71, 0x5c20, 0x4b8e, { 0xa1, 0x77, 0x6e, 0x24, 0x41, 0x10, 0x44, 0x01 } }
+
+  # Exynos4 s3c2410-style I2C controllers 0..7 (Write/Read/Xfer).
+  gExynosI2cProtocolGuid         = { 0x9d3f4a71, 0x5c20, 0x4b8e, { 0xa1, 0x77, 0x6e, 0x24, 0x41, 0x10, 0x44, 0x02 } }
+
+  # Exynos4 clock controller (gates + special-clock rates).
+  gExynosClockProtocolGuid       = { 0x9d3f4a71, 0x5c20, 0x4b8e, { 0xa1, 0x77, 0x6e, 0x24, 0x41, 0x10, 0x44, 0x03 } }
+
+  # Generic keypad device protocol (Reset/GetKeys), same GUID HtcLeoPkg
+  # and the rest of the EFIDroid lineage use for the KeypadDxe chain.
+  gEFIDroidKeypadDeviceProtocolGuid = { 0xb27625b5, 0x0b6c, 0x4614, { 0xaa, 0x3c, 0x33, 0x13, 0xb5, 0x1d, 0x36, 0x46 } }
+
+[PcdsFixedAtBuild.common]
+  # Framebuffer left programmed by the Samsung bootloader.
+  # Values below are fallbacks: FrameBufferConfigLib discovers the real
+  # geometry by reading the FIMD1 window registers at runtime.
+  # The v1awifi panel is landscape: 2560 wide, 1600 tall (XRGB8888).
+  gExynos5420PkgTokenSpaceGuid.PcdFrameBufferAddress|0x0|UINT32|0x00001000
+  gExynos5420PkgTokenSpaceGuid.PcdFrameBufferWidth|2560|UINT32|0x00001001
+  gExynos5420PkgTokenSpaceGuid.PcdFrameBufferHeight|1600|UINT32|0x00001002
+  gExynos5420PkgTokenSpaceGuid.PcdFrameBufferPixelBpp|32|UINT32|0x00001003
+
+  # Exynos5420 peripheral bases (android_kernel_samsung_exynos5420 mach/map.h)
+  gExynos5420PkgTokenSpaceGuid.PcdFimdBaseAddress|0x14400000|UINT32|0x00001004
+  gExynos5420PkgTokenSpaceGuid.PcdSerialRegisterBase|0x12C20000|UINT32|0x00001005
+  gExynos5420PkgTokenSpaceGuid.PcdMctBaseAddress|0x101C0000|UINT32|0x00001006
+  gExynos5420PkgTokenSpaceGuid.PcdGicDistributorBase|0x10481000|UINT32|0x00001007
+  gExynos5420PkgTokenSpaceGuid.PcdGicCpuInterfaceBase|0x10482000|UINT32|0x00001008
+  gExynos5420PkgTokenSpaceGuid.PcdPmuBaseAddress|0x10040000|UINT32|0x00001009
+  gExynos5420PkgTokenSpaceGuid.PcdWatchdogBaseAddress|0x101D0000|UINT32|0x0000100A
+
+  # ATAGS / machine type (for later kernel hand-off).
+  # universal5420 uses MACH_TYPE from the kernel's mach-types table.
+  gExynos5420PkgTokenSpaceGuid.PcdMachType|0|UINT32|0x0000100B
+
+  # 24 MHz crystal drives the Exynos MCT free-running counter.
+  gExynos5420PkgTokenSpaceGuid.PcdMctFrequencyHz|24000000|UINT32|0x0000100C
+
+  # MCT global comparator 0 interrupt.  On Exynos5420 the MCT_G0 line is
+  # GIC SPI 104 (exynos5420.dtsi: mct interrupts = <GIC_SPI 104 ...>),
+  # so GIC INTID = 104 + 32 = 136.  The kernel programs the combiner to
+  # pass this through during boot, and the BL leaves that config in place.
+  gExynos5420PkgTokenSpaceGuid.PcdMctGlobalTimerIrq|136|UINT32|0x0000100D
