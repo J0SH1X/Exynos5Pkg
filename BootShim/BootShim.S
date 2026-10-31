@@ -31,12 +31,6 @@
 #define BOOT_PARAMS_BASE   0x4FEF0000
 #define BOOT_PARAMS_MAGIC  0x41505442	/* 'BTPA' */
 
-/* Stage colours, STR'd as 32-bit words into an XRGB8888 buffer: the word
- * 0x00RRGGBB lands as memory bytes [BB,GG,RR,00] = that colour on screen. */
-#define COLOR_RED       0x00FF0000
-#define COLOR_GREEN     0x0000FF00
-#define COLOR_MAGENTA   0x00FF00FF
-
 #define DSB .byte 0x4f, 0xf0, 0x7f, 0xf5
 #define ISB .byte 0x6f, 0xf0, 0x7f, 0xf5
 
@@ -194,23 +188,6 @@ _ScanFbNext:
 	blo	_ScanFbWindow
 _ScanFbDone:
 
-	/* Stage RED: framebuffer discovered and we are executing. */
-	mov	r0, r12			/* fb start */
-	mov	r1, r14			/* buffer size */
-	ldr	r2, =COLOR_RED
-	bl	_Paint
-
-	ldr	r5, =0x10000
-_Spin1:
-	subs	r5, r5, #1
-	bne	_Spin1
-
-	/* Stage GREEN: CPU cleanup done, about to relocate the FD. */
-	mov	r0, r12
-	mov	r1, r14
-	ldr	r2, =COLOR_GREEN
-	bl	_Paint
-
 	/*
 	 * Relocate the attached FD to UEFI_BASE.  r0 = runtime address of
 	 * _Payload (i.e. wherever the BL loaded us, position independent),
@@ -246,12 +223,6 @@ _CopyBack:
 	bgt	1b
 
 _Entry:
-	/* Stage MAGENTA: FD relocated to UEFI_BASE, about to jump in. */
-	mov	r0, r12
-	mov	r1, r14
-	ldr	r2, =COLOR_MAGENTA
-	bl	_Paint
-
 	/* The freshly copied code at UEFI_BASE must not be fetched from any
 	 * stale I-cache/BTB lines: invalidate before jumping into it. */
 	mov	r0, #0
@@ -268,29 +239,6 @@ _Entry:
 	mov	r1, r14
 	ldr	r5, =UEFI_BASE
 	bx	r5
-
-/*
- * _Paint: fill [r0, r0+r1) with the 32-bit word in r2, uncached.
- * Assumes 32bpp (the BL programs the splash in XRGB8888).  Uses r3/r4/r5.
- */
-_Paint:
-	cmp	r0, #0
-	moveq	pc, lr
-	cmp	r1, #0
-	moveq	pc, lr
-	/* Clamp a runaway size to 64 MB so a bad END register cannot walk
-	 * all of DRAM. */
-	ldr	r3, =0x04000000
-	cmp	r1, r3
-	movhi	r1, r3
-	add	r1, r0, r1		/* r1 = exclusive end */
-	mov	r3, r0			/* cursor */
-1:
-	str	r2, [r3], #4
-	cmp	r3, r1
-	blo	1b
-	dsb
-	mov	pc, lr
 
 .ltorg
 

@@ -166,10 +166,4 @@ echo
 echo "Flash it to the BOOT partition (Heimdall):"
 echo "  heimdall flash --BOOT $BOOTIMG"
 echo
-echo "Then boot the tablet.  Watch the panel:"
-echo "  RED     -> shim running, FIMD1 framebuffer found"
-echo "  GREEN   -> CPU cleanup done, FD about to relocate"
-echo "  MAGENTA -> FD relocated to 0x50000000, about to jump"
-echo "  BLUE    -> PrePi C entry reached"
-echo "  text    -> console up (DEBUG log + UEFI Shell)"
-echo "  splash  -> shim never ran or framebuffer discovery failed"
+echo "Boot log over USB: sudo python3 Tools/usblog.py"

@@ -304,10 +304,6 @@ CEntryPoint (
 {
   UINT64  StartTimeStamp;
 
-  // Stage marker: BLUE = PrePi C entry reached.  RED/GREEN/MAGENTA come
-  // from the BootShim.  Strip once everything boots.
-  PaintScreen (0x000000FF);
-
   //
   // Fresh boot log before the first DEBUG() (UsbLogDxe ships it to a host).
   //
