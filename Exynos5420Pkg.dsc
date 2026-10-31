@@ -82,6 +82,15 @@
   Exynos5420Pkg/Drivers/KeypadDxe/KeypadDxe.inf
 
   #
+  # Storage: eMMC (dw_mmc ch0) + microSD (dw_mmc ch2, only when the card-detect
+  # pin reports a card), then the disk stack (partition + FAT) on BlockIo.
+  #
+  Exynos5420Pkg/Drivers/SdCardDxe/SdCardDxe.inf
+  MdeModulePkg/Universal/Disk/DiskIoDxe/DiskIoDxe.inf
+  MdeModulePkg/Universal/Disk/PartitionDxe/PartitionDxe.inf
+  FatPkg/EnhancedFatDxe/Fat.inf
+
+  #
   # USB peripheral (device mode only): EFI_USBFN_IO_PROTOCOL over the DWC3
   # USB3.0 DRD0 at 0x12000000.  UsbLogDxe streams the boot log ring to a host PC.
   #

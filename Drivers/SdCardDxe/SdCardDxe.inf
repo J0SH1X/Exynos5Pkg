@@ -1,0 +1,45 @@
+#
+#  Exynos5420 (v1awifi) eMMC + microSD storage: EFI_BLOCK_IO_PROTOCOL on
+#  dw_mmc channel 0 (eMMC) and channel 2 (microSD, card-detect gated).
+#
+#  SPDX-License-Identifier: BSD-2-Clause-Patent
+#
+
+[Defines]
+  INF_VERSION    = 0x00010005
+  BASE_NAME      = Exynos5420SdCardDxe
+  FILE_GUID      = 5d2a1c40-5420-4e6b-9a11-2233445554ff
+  MODULE_TYPE    = DXE_DRIVER
+  VERSION_STRING = 1.0
+
+  ENTRY_POINT    = SdCardInitialize
+
+[Sources.common]
+  SdCardDxe.h
+  SdCardDxe.c
+  MmcCore.c
+  Dwmci.c
+
+[Packages]
+  MdePkg/MdePkg.dec
+  ArmPkg/ArmPkg.dec
+  Exynos5420Pkg/Exynos5420Pkg.dec
+
+[LibraryClasses]
+  BaseLib
+  BaseMemoryLib
+  CacheMaintenanceLib
+  DebugLib
+  IoLib
+  MemoryAllocationLib
+  TimerLib
+  UefiBootServicesTableLib
+  UefiDriverEntryPoint
+
+[Protocols]
+  gEfiBlockIoProtocolGuid
+  gEfiDevicePathProtocolGuid
+  gExynosGpioProtocolGuid
+
+[Depex]
+  gExynosGpioProtocolGuid
