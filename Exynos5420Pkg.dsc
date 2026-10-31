@@ -67,10 +67,26 @@
   MdeModulePkg/Universal/CapsuleRuntimeDxe/CapsuleRuntimeDxe.inf
 
   #
-  # Timer: MCT global comparator 0 -> GIC INTID 443.  Gives the DXE Core a
-  # real tick so timed events (boot timeout, Stall, SetTimer) work.
+  # Timer: MCT global comparator 0 -> GIC INTID 136 (SPI 104).  Gives the
+  # DXE Core a real tick so timed events (boot timeout, Stall, SetTimer)
+  # work.
   #
   Exynos5420Pkg/Drivers/MctTimerDxe/MctTimerDxe.inf
+
+  #
+  # Keypad / GPIO / I2C (v1awifi buttons: power + vol up/down + home).
+  #
+  Exynos5420Pkg/Drivers/GpioDxe/GpioDxe.inf
+  Exynos5420Pkg/Drivers/I2CDxe/I2CDxe.inf
+  Exynos5420Pkg/Drivers/GenericKeypadDeviceDxe/GenericKeypadDeviceDxe.inf
+  Exynos5420Pkg/Drivers/KeypadDxe/KeypadDxe.inf
+
+  #
+  # USB peripheral (device mode only): EFI_USBFN_IO_PROTOCOL over the DWC2
+  # HSOTG at 0x12140000.  UsbLogDxe streams the boot log ring to a host PC.
+  #
+  Exynos5420Pkg/Drivers/UsbFnDxe/UsbFnDxe.inf
+  Exynos5420Pkg/Drivers/UsbLogDxe/UsbLogDxe.inf
 
   #
   # Interrupt controller (GIC-400 at 0x10481000/0x10482000).

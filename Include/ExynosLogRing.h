@@ -4,7 +4,7 @@
 
   Fixed 1 MiB right below the FD (0x40F00000-0x41000000): above the payload
   the bootloader loads at 0x40008000, below the relocated FD, and carved out
-  of system memory by Exynos5420PkgMem.c.  PrePi resets it on every boot.
+  of system memory by Exynos441xPkgMem.c.  PrePi resets it on every boot.
 
   Head counts bytes ever written; the byte for position N lives at
   Data[N % LOG_RING_DATA_SIZE].  A reader keeps its own position and skips
@@ -16,7 +16,7 @@
 #ifndef __EXYNOS_LOG_RING_H__
 #define __EXYNOS_LOG_RING_H__
 
-#define LOG_RING_BASE       0x4FF00000
+#define LOG_RING_BASE       0x40F00000
 #define LOG_RING_SIZE       0x00100000
 #define LOG_RING_MAGIC      SIGNATURE_32 ('L', 'O', 'G', 'R')
 

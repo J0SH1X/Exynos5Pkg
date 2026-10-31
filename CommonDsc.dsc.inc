@@ -75,6 +75,10 @@
   TimerLib|Exynos5420Pkg/Library/MctTimerLib/MctTimerLib.inf
   PlatformBootManagerLib|Exynos5420Pkg/Library/PlatformBootManagerLib/PlatformBootManagerLib.inf
 
+  # Keypad chain (GenericKeypadDeviceDxe -> KeypadDxe -> SimpleTextIn)
+  KeypadDeviceHelperLib|Exynos5420Pkg/Library/KeypadDeviceHelperLib/KeypadDeviceHelperLib.inf
+  KeypadDeviceImplLib|Exynos5420Pkg/Library/KeypadDeviceImplLib/KeypadDeviceImplLib.inf
+
   # (Keypad chain removed for milestone 2: no keypad/touch drivers yet.)
 
   PeCoffExtraActionLib|ArmPkg/Library/DebugPeCoffExtraActionLib/DebugPeCoffExtraActionLib.inf

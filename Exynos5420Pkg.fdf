@@ -115,6 +115,24 @@ APRIORI DXE {
   INF Exynos5420Pkg/Drivers/MctTimerDxe/MctTimerDxe.inf
 
   #
+  # Keypad / GPIO / I2C (v1awifi buttons: power + vol up/down + home).
+  # GpioDxe must dispatch before GenericKeypadDeviceDxe (its DEPEX), which
+  # publishes KEYPAD_DEVICE_PROTOCOL for KeypadDxe's driver binding to turn
+  # into SimpleTextIn.
+  #
+  INF Exynos5420Pkg/Drivers/GpioDxe/GpioDxe.inf
+  INF Exynos5420Pkg/Drivers/I2CDxe/I2CDxe.inf
+  INF Exynos5420Pkg/Drivers/GenericKeypadDeviceDxe/GenericKeypadDeviceDxe.inf
+  INF Exynos5420Pkg/Drivers/KeypadDxe/KeypadDxe.inf
+
+  #
+  # USB peripheral (device mode only): EFI_USBFN_IO_PROTOCOL over the DWC2
+  # HSOTG at 0x12140000.  UsbLogDxe streams the boot log ring to a host PC.
+  #
+  INF Exynos5420Pkg/Drivers/UsbFnDxe/UsbFnDxe.inf
+  INF Exynos5420Pkg/Drivers/UsbLogDxe/UsbLogDxe.inf
+
+  #
   # Multiple Console IO support
   #
   INF MdeModulePkg/Universal/Console/ConPlatformDxe/ConPlatformDxe.inf
