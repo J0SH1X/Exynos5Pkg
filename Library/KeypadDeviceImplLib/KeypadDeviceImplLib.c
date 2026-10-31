@@ -116,26 +116,6 @@ KeypadDeviceImplGetKeys (
   UINTN    Level;
   BOOLEAN  IsPressed;
 
-  //
-  // DEBUG: dump the raw button registers twice a second so a panel photo
-  // shows whether the pins ever move.  GPX0 CON/DAT/PULL at 0x13400C00,
-  // GPX2 at 0x13400C40.  Delta is nanoseconds (GetTimeInNanoSecond).
-  // DEBUG_ERROR because PcdDebugPrintErrorLevel masks out DEBUG_INFO.
-  //
-  {
-    STATIC UINT64 mDumpAccum = 0;
-    mDumpAccum += Delta;
-    if (mDumpAccum >= 500000000ULL) {
-      mDumpAccum = 0;
-      DEBUG ((DEBUG_ERROR,
-              "GPX0 CON=%08x DAT=%08x PULL=%08x | GPX2 CON=%08x DAT=%08x PULL=%08x\n",
-              MmioRead32 (0x13400C00), MmioRead32 (0x13400C04),
-              MmioRead32 (0x13400C08),
-              MmioRead32 (0x13400C40), MmioRead32 (0x13400C44),
-              MmioRead32 (0x13400C48)));
-    }
-  }
-
   for (Index = 0; Index < (sizeof (KeyList) / sizeof (KeyList[0])); Index++) {
     KEY_CONTEXT_PRIVATE *Context = KeyList[Index];
 

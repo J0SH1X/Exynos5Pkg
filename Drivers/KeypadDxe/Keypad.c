@@ -313,10 +313,6 @@ KeypadControllerDriverStart(
     goto ErrorExit;
   }
 
-  DEBUG ((DEBUG_ERROR,
-          "WATCH 3/4: KeypadDxe OK - SimpleTextIn produced, stalling 5s\n"));
-  gBS->Stall (5000000);
-
   return Status;
 
 ErrorExit:

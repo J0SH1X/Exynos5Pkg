@@ -67,26 +67,6 @@ VOID EFIAPI KeypadTimerHandler(IN EFI_EVENT Event, IN VOID *Context)
       GetTimeInNanoSecond(DeltaCounter));
 
   //
-  // DEBUG: prove the poll timer is still alive (every 10 s: 500 x 20 ms)
-  // and show queue depth on activity.  DEBUG_ERROR because DEBUG_INFO is
-  // masked by PcdDebugPrintErrorLevel.
-  //
-  {
-    STATIC UINT32 mTicks = 0;
-    mTicks++;
-    if ((mTicks % 500) == 0) {
-      DEBUG ((DEBUG_ERROR, "KP tick alive x%u, queue H=%u T=%u\n", mTicks,
-              (UINT32)ConsoleIn->EfiKeyQueue.Head,
-              (UINT32)ConsoleIn->EfiKeyQueue.Tail));
-    }
-    if (ConsoleIn->EfiKeyQueue.Head != ConsoleIn->EfiKeyQueue.Tail) {
-      DEBUG ((DEBUG_ERROR, "KP key queued H=%u T=%u\n",
-              (UINT32)ConsoleIn->EfiKeyQueue.Head,
-              (UINT32)ConsoleIn->EfiKeyQueue.Tail));
-    }
-  }
-
-  //
   // Leave critical section and return
   //
   gBS->RestoreTPL(OldTpl);

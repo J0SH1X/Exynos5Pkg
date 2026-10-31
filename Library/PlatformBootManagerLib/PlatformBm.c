@@ -256,26 +256,6 @@ PlatformBootManagerBeforeConsole (
   //
   FilterAndProcess (&gEFIDroidKeypadDeviceProtocolGuid, AddInput);
 
-  //
-  // DEBUG: confirm the keypad handle exists and was added to ConIn; stall
-  // 5 s so the message is readable on the panel.
-  //
-  {
-    VOID  *Keypad = NULL;
-
-    if (!EFI_ERROR (gBS->LocateProtocol (
-                          &gEFIDroidKeypadDeviceProtocolGuid, NULL,
-                          &Keypad))) {
-      DEBUG ((DEBUG_ERROR,
-              "WATCH 4/4: keypad handle found, added to ConIn - stalling 5s\n"));
-    } else {
-      DEBUG ((DEBUG_ERROR,
-              "WATCH 4/4: NO keypad handle! GenericKeypadDeviceDxe never dispatched - stalling 5s\n"));
-    }
-
-    gBS->Stall (5000000);
-  }
-
   // The Shell has to exist before BDS sorts BootOrder.
   AddBootOptionForFile (SHELL_APP_TITLE, &gUefiShellFileGuid);
 }

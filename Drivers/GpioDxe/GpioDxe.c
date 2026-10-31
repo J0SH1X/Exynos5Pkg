@@ -241,7 +241,5 @@ GpioDxeInitialize (
                   );
   ASSERT_EFI_ERROR (Status);
 
-  DEBUG ((DEBUG_ERROR, "WATCH 1/4: GpioDxe OK - Exynos GPIO protocol installed, stalling 5s\n"));
-  gBS->Stall (5000000);
   return Status;
 }

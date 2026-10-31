@@ -25,9 +25,5 @@ KeypadDeviceDxeInitialize(
       &gEfiDevicePathProtocolGuid, &mInternalKeypadDevicePath, NULL);
   ASSERT_EFI_ERROR(Status);
 
-  DEBUG ((DEBUG_ERROR,
-          "WATCH 2/4: GenericKeypadDeviceDxe OK - KEYPAD_DEVICE_PROTOCOL installed, stalling 5s\n"));
-  gBS->Stall (5000000);
-
   return Status;
 }
