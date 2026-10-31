@@ -12,9 +12,11 @@
   handler simply gets a fresh full period instead of drifting against a
   free-running auto-increment buffer.
 
-  G_COMP0 is a shared peripheral interrupt (SPI 57 = GIC INTID 89), so it
-  arrives at whatever core the GIC routes it to; on this uni-core bring-up
-  that is CPU0 via the normal ArmGicDxe path.
+  On Exynos5420 G_COMP0 reaches the GIC through the interrupt combiner:
+  group 23 bit 3 (EXYNOS5_IRQ_MCT_G0 = COMBINER_IRQ(23, 3)), and combiner
+  group N drives GIC SPI N, so the GIC sees it as SPI 23 = INTID 55
+  (PcdMctGlobalTimerIrq).  The combiner input is a level OR of its sources:
+  clearing G_INT_CSTAT drops it.
 
   SPDX-License-Identifier: BSD-2-Clause-Patent
 **/
@@ -60,6 +62,18 @@
 #define MCT_G_WSTAT_COMP0_U     (1u << 1)
 #define MCT_G_WSTAT_COMP0_INCR  (1u << 2)
 #define MCT_G_WSTAT_TCON        (1u << 16)
+
+//
+// Interrupt combiner (EXYNOS5_PA_COMBINER): four groups per 0x10 block,
+// eight inputs per group.
+//
+#define COMBINER_BASE           0x10440000
+#define COMBINER_ENABLE_SET     0x0
+#define COMBINER_ENABLE_CLEAR   0x4
+#define MCT_G0_COMBINER_GROUP   23
+#define MCT_G0_COMBINER_BIT     3
+#define COMBINER_REG(Group, Off)  (COMBINER_BASE + ((Group) >> 2) * 0x10 + (Off))
+#define COMBINER_SHIFT(Group)     (((Group) & 3) * 8)
 
 #define MCT_BASE   PcdGet32 (PcdMctBaseAddress)
 #define MCT_FREQ   PcdGet32 (PcdMctFrequencyHz)
@@ -410,6 +424,13 @@ TimerInitialize (
     return Status;
   }
 
+  // Only MCT G0 drives combiner group 23 (whatever the bootloader enabled
+  // there is masked), so the GIC line carries nothing but the tick.
+  MmioWrite32 (COMBINER_REG (MCT_G0_COMBINER_GROUP, COMBINER_ENABLE_CLEAR),
+               0xFFu << COMBINER_SHIFT (MCT_G0_COMBINER_GROUP));
+  MmioWrite32 (COMBINER_REG (MCT_G0_COMBINER_GROUP, COMBINER_ENABLE_SET),
+               1u << (COMBINER_SHIFT (MCT_G0_COMBINER_GROUP) + MCT_G0_COMBINER_BIT));
+
   // The comparator interrupt must be routed before it can be enabled.
   Status = gInterrupt->RegisterInterruptSource (
                          gInterrupt,
@@ -425,6 +446,8 @@ TimerInitialize (
                          PcdGet32 (PcdMctGlobalTimerIrq)
                          );
   if (EFI_ERROR (Status)) {
+    DEBUG ((DEBUG_ERROR, "MctTimer: enable INTID %u failed - %r\n",
+            PcdGet32 (PcdMctGlobalTimerIrq), Status));
     return Status;
   }
 

@@ -1,6 +1,7 @@
 #
-#  Exynos5420 USB peripheral driver: EFI_USBFN_IO_PROTOCOL on the DWC2 USB
-#  device controller at 0x12140000 (device mode only), interrupt driven.
+#  Exynos5420 USB peripheral driver: EFI_USBFN_IO_PROTOCOL on USB3.0 DRD0
+#  (Synopsys DWC3 at 0x12000000, PHY at 0x12100000), device mode only,
+#  high speed, interrupt driven.
 #
 #  SPDX-License-Identifier: BSD-2-Clause-Patent
 #
@@ -17,7 +18,7 @@
 [Sources.common]
   UsbFnDxe.h
   UsbFnDxe.c
-  Dwc2.c
+  Dwc3.c
   Board.c
   SelfTest.c
 
@@ -30,7 +31,9 @@
 [LibraryClasses]
   BaseLib
   BaseMemoryLib
+  CacheMaintenanceLib
   DebugLib
+  DxeServicesTableLib
   IoLib
   MemoryAllocationLib
   UefiBootServicesTableLib
@@ -39,6 +42,7 @@
 [Protocols]
   gEfiUsbFunctionIoProtocolGuid
   gHardwareInterruptProtocolGuid
+  gEfiCpuArchProtocolGuid
 
 [Depex]
-  gHardwareInterruptProtocolGuid
+  gHardwareInterruptProtocolGuid AND gEfiCpuArchProtocolGuid

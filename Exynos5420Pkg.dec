@@ -63,8 +63,10 @@
   # 24 MHz crystal drives the Exynos MCT free-running counter.
   gExynos5420PkgTokenSpaceGuid.PcdMctFrequencyHz|24000000|UINT32|0x0000100C
 
-  # MCT global comparator 0 interrupt.  On Exynos5420 the MCT_G0 line is
-  # GIC SPI 104 (exynos5420.dtsi: mct interrupts = <GIC_SPI 104 ...>),
-  # so GIC INTID = 104 + 32 = 136.  The kernel programs the combiner to
-  # pass this through during boot, and the BL leaves that config in place.
-  gExynos5420PkgTokenSpaceGuid.PcdMctGlobalTimerIrq|136|UINT32|0x0000100D
+  # MCT global comparator 0 interrupt.  On Exynos5420 MCT_G0 is not a
+  # direct GIC input: it sits behind the interrupt combiner, group 23 bit 3
+  # (downstream irqs.h: EXYNOS5_IRQ_MCT_G0 = COMBINER_IRQ(23, 3)), and
+  # combiner group N cascades to GIC SPI N (common.c: combiner_cascade_irq
+  # (n, IRQ_SPI(n))).  So GIC INTID = 23 + 32 = 55; MctTimerDxe enables the
+  # combiner bit.  (SPI 104 is PCM2 on this SoC.)
+  gExynos5420PkgTokenSpaceGuid.PcdMctGlobalTimerIrq|55|UINT32|0x0000100D

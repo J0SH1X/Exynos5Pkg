@@ -1,12 +1,22 @@
 /** @file
-  Exynos5420 USB peripheral driver (DWC2 USB device controller at 0x12140000).
+  Exynos5420 USB peripheral driver: EFI_USBFN_IO_PROTOCOL on USB3.0 DRD
+  channel 0 (Synopsys DWC3 at 0x12000000, PHY at 0x12100000).
 
-  Publishes EFI_USBFN_IO_PROTOCOL.  Peripheral mode only: the core is forced
-  into device mode; there is no host role, no ID pin and no VBUS drive.
+  v1awifi wires the micro-USB data lines to DRD0 (the kernel's defconfig:
+  CONFIG_USB_EXYNOS5_USB3_DRD_CH0=y, gadget = exynos-ss-udc).  The 5420 also
+  has a DWC2 HSOTG block at 0x12140000, but nothing is connected to it.
 
-  Interrupt driven: the controller interrupt services the FIFOs and the EP0
-  standard requests and queues UsbFn messages; EventHandler() only dequeues
-  them.  Data moves through the FIFOs in slave (PIO) mode.
+  Peripheral mode only, forced to high speed (the descriptors UsbLogDxe
+  publishes are USB 2.0; no SuperSpeed companion descriptors).
+
+  Interrupt driven: the controller interrupt drains the event buffer, runs
+  the EP0 control state machine, answers the standard requests the driver
+  owns and queues UsbFn messages; EventHandler() only dequeues them.
+
+  Data moves by DMA through TRBs.  Every TRB, the event buffer and one
+  bounce buffer per endpoint/direction live in a DMA pool that is mapped
+  uncached when the CPU driver allows it; cache maintenance is done anyway,
+  so a cached pool is still correct.
 
   SPDX-License-Identifier: BSD-2-Clause-Patent
 **/
@@ -18,7 +28,9 @@
 #include <IndustryStandard/Usb.h>
 #include <Library/BaseLib.h>
 #include <Library/BaseMemoryLib.h>
+#include <Library/CacheMaintenanceLib.h>
 #include <Library/DebugLib.h>
+#include <Library/DxeServicesTableLib.h>
 #include <Library/IoLib.h>
 #include <Library/MemoryAllocationLib.h>
 #include <Library/UefiBootServicesTableLib.h>
@@ -26,121 +38,181 @@
 #include <Protocol/UsbFunctionIo.h>
 
 //
-// Controller base and interrupt (map.h EXYNOS5_PA_USB_HSOTG = 0x12140000,
-// irqs.h EXYNOS5_IRQ_OTG = SPI 74 -> GIC INTID 106).  Same DWC2 IP as the
-// Exynos4210, relocated on the 5420.
+// Controller base and interrupt (map.h EXYNOS5_PA_USB3_DRD0 = 0x12000000,
+// irqs.h EXYNOS5_IRQ_USB3_DRD0 = SPI 72 -> GIC INTID 104).
 //
-#define DWC2_BASE  0x12140000
-#define DWC2_IRQ   (32 + 74)
-
-//
-// DWC2 global registers.
-//
-#define GAHBCFG    0x008
-#define GUSBCFG    0x00C
-#define GRSTCTL    0x010
-#define GINTSTS    0x014
-#define GINTMSK    0x018
-#define GRXSTSP    0x020
-#define GRXFSIZ    0x024
-#define GNPTXFSIZ  0x028
-#define GSNPSID    0x040
-#define GHWCFG2    0x048
-#define GHWCFG3    0x04C
-#define GHWCFG4    0x050
-#define DIEPTXF(n) (0x104 + ((n) - 1) * 4)
-
-#define GAHBCFG_GLBLINTRMSK    (1U << 0)
-#define GAHBCFG_TXFEMPLVL      (1U << 7)   // TxFE when the FIFO is completely empty
-
-#define GUSBCFG_FORCEDEVMODE   (1U << 30)
-#define GUSBCFG_PHYIF16        (1U << 3)
-#define GUSBCFG_TRDTIM(x)      ((x) << 10)
-#define GUSBCFG_TOUTCAL(x)     (x)
-
-#define GRSTCTL_CSFTRST        (1U << 0)
-#define GRSTCTL_RXFFLSH        (1U << 4)
-#define GRSTCTL_TXFFLSH        (1U << 5)
-#define GRSTCTL_TXFNUM(x)      ((x) << 6)
-#define GRSTCTL_TXFNUM_ALL     GRSTCTL_TXFNUM (0x10)
-#define GRSTCTL_AHBIDLE        (1U << 31)
-
-#define GINT_RXFLVL            (1U << 4)
-#define GINT_USBSUSP           (1U << 11)
-#define GINT_USBRST            (1U << 12)
-#define GINT_ENUMDONE          (1U << 13)
-#define GINT_IEPINT            (1U << 18)
-#define GINT_OEPINT            (1U << 19)
-#define GINT_WKUPINT           (1U << 31)
-#define GINT_DEVICE_MASK       (GINT_RXFLVL | GINT_USBSUSP | GINT_USBRST | \
-                                GINT_ENUMDONE | GINT_IEPINT | GINT_OEPINT | \
-                                GINT_WKUPINT)
-
-#define GRXSTS_EPNUM(x)        ((x) & 0xF)
-#define GRXSTS_BCNT(x)         (((x) >> 4) & 0x7FF)
-#define GRXSTS_PKTSTS(x)       (((x) >> 17) & 0xF)
-#define PKTSTS_OUT_DATA        2
-#define PKTSTS_OUT_DONE        3
-#define PKTSTS_SETUP_DONE      4
-#define PKTSTS_SETUP_DATA      6
+#define DWC3_BASE      0x12000000
+#define DWC3_PHY_BASE  0x12100000
+#define DWC3_IRQ       (32 + 72)
 
 //
-// DWC2 device registers.
+// DWC3 global registers (exynos-drd.h).
 //
-#define DCFG        0x800
-#define DCTL        0x804
-#define DSTS        0x808
-#define DIEPMSK     0x810
-#define DOEPMSK     0x814
-#define DAINT       0x818
-#define DAINTMSK    0x81C
-#define DIEPEMPMSK  0x834
-#define DIEPCTL(n)  (0x900 + (n) * 0x20)
-#define DIEPINT(n)  (0x908 + (n) * 0x20)
-#define DIEPTSIZ(n) (0x910 + (n) * 0x20)
-#define DTXFSTS(n)  (0x918 + (n) * 0x20)
-#define DOEPCTL(n)  (0xB00 + (n) * 0x20)
-#define DOEPINT(n)  (0xB08 + (n) * 0x20)
-#define DOEPTSIZ(n) (0xB10 + (n) * 0x20)
-#define PCGCCTL     0xE00
-#define DFIFO(n)    (0x1000 + (n) * 0x1000)
+#define GSBUSCFG0             0xC100
+#define GSBUSCFG1             0xC104
+#define GRXTHRCFG             0xC10C
+#define GCTL                  0xC110
+#define GSNPSID               0xC120
+#define GUCTL                 0xC12C
+#define GUSB2PHYCFG           0xC200
+#define GUSB3PIPECTL          0xC2C0
+#define GEVNTADRLO            0xC400
+#define GEVNTADRHI            0xC404
+#define GEVNTSIZ              0xC408
+#define GEVNTCOUNT            0xC40C
 
-#define DCFG_DEVADDR_MASK      (0x7FU << 4)
-#define DCFG_DEVADDR(x)        ((x) << 4)
+#define GSBUSCFG0_INCR16      (1U << 3)
+#define GSBUSCFG0_INCR        (1U << 0)
+#define GSBUSCFG1_BREQLIMIT(x) ((x) << 8)
 
-#define DCTL_SFTDISCON         (1U << 1)
-#define DCTL_CGNPINNAK         (1U << 8)
-#define DCTL_CGOUTNAK          (1U << 10)
+#define GRXTHRCFG_PKTCNTSEL   (1U << 29)
+#define GRXTHRCFG_PKTCNT(x)   ((x) << 24)
+#define GRXTHRCFG_PKTCNT_MASK (0xFU << 24)
+#define GRXTHRCFG_MAXBURST(x) ((x) << 19)
+#define GRXTHRCFG_MAXBURST_MASK (0x1FU << 19)
 
-#define DSTS_ENUMSPD(x)        (((x) >> 1) & 0x3)
-#define ENUMSPD_HS             0
+#define GCTL_PWRDNSCALE(x)    ((x) << 19)
+#define GCTL_PWRDNSCALE_MASK  (0x1FFFU << 19)
+#define GCTL_U2RSTECN         (1U << 16)
+#define GCTL_PRTCAPDIR_MASK   (0x3U << 12)
+#define GCTL_PRTCAPDIR_DEVICE (0x2U << 12)
+#define GCTL_CORESOFTRESET    (1U << 11)
+#define GCTL_RAMCLKSEL_MASK   (0x3U << 6)
+#define GCTL_DISSCRAMBLE      (1U << 3)
 
-#define DEPCTL_MPS_MASK        0x7FF
-#define DEPCTL_USBACTEP        (1U << 15)
-#define DEPCTL_EPTYPE(x)       ((x) << 18)
-#define DEPCTL_STALL           (1U << 21)
-#define DEPCTL_TXFNUM(x)       ((x) << 22)
-#define DEPCTL_CNAK            (1U << 26)
-#define DEPCTL_SNAK            (1U << 27)
-#define DEPCTL_SETD0PID        (1U << 28)
-#define DEPCTL_EPDIS           (1U << 30)
-#define DEPCTL_EPENA           (1U << 31)
+#define GUCTL_HSTINAUTORETRY  (1U << 14)
 
-#define DEPINT_XFERCOMPL       (1U << 0)
-#define DEPINT_EPDISBLD        (1U << 1)
-#define DOEPINT_SETUP          (1U << 3)
-#define DIEPINT_TXFE           (1U << 7)
+#define GUSB2PHYCFG_PHYSOFTRST (1U << 31)
+#define GUSB2PHYCFG_TRDTIM(x)  ((x) << 10)
+#define GUSB2PHYCFG_TRDTIM_MASK (0xFU << 10)
+#define GUSB2PHYCFG_ENBLSLPM   (1U << 8)
+#define GUSB2PHYCFG_SUSPHY     (1U << 6)
+#define GUSB2PHYCFG_PHYIF      (1U << 3)
 
-#define DEPTSIZ_PKTCNT(x)      ((x) << 19)
-#define DOEPTSIZ0_SUPCNT(x)    ((x) << 29)
+#define GUSB3PIPECTL_PHYSOFTRST (1U << 31)
+#define GUSB3PIPECTL_DELAYP1P2P3(x) ((x) << 19)
+#define GUSB3PIPECTL_DELAYP1P2P3_MASK (0x7U << 19)
+#define GUSB3PIPECTL_SUSPSSPHY  (1U << 17)
+
+#define GEVNTSIZ_INTMASK      (1U << 31)
 
 //
-// FIFO layout, in 32-bit words: one shared RX FIFO, then one TX FIFO per IN
-// endpoint (dedicated-FIFO mode).
+// DWC3 device registers (exynos_ss_udc.h).
 //
-#define RX_FIFO_WORDS    512
-#define EP0_TXF_WORDS    64
-#define EPN_TXF_WORDS    256
+#define DCFG                  0xC700
+#define DCTL                  0xC704
+#define DEVTEN                0xC708
+#define DSTS                  0xC70C
+#define DGCMDPAR              0xC710
+#define DGCMD                 0xC714
+#define DALEPENA              0xC720
+#define DEPCMDPAR2(n)         (0xC800 + (n) * 0x10)
+#define DEPCMDPAR1(n)         (0xC804 + (n) * 0x10)
+#define DEPCMDPAR0(n)         (0xC808 + (n) * 0x10)
+#define DEPCMD(n)             (0xC80C + (n) * 0x10)
+
+#define DCFG_NUMP(x)          ((x) << 17)
+#define DCFG_PERFRINT(x)      ((x) << 10)
+#define DCFG_DEVADDR_MASK     (0x7FU << 3)
+#define DCFG_DEVADDR(x)       ((x) << 3)
+#define DCFG_DEVSPD_HS        0
+#define DCFG_DEVSPD_MASK      0x7U
+
+#define DCTL_RUNSTOP          (1U << 31)
+#define DCTL_CSFTRST          (1U << 30)
+#define DCTL_TSTCTL_MASK      (0xFU << 1)
+
+#define DEVTEN_ULSTCNG        (1U << 3)
+#define DEVTEN_CONNECTDONE    (1U << 2)
+#define DEVTEN_USBRST         (1U << 1)
+#define DEVTEN_DISCONN        (1U << 0)
+
+#define DSTS_DEVCTRLHLT       (1U << 22)
+#define DSTS_CONNECTSPD(x)    ((x) & 0x7)
+#define CONNECTSPD_HS         0
+#define CONNECTSPD_FS         1
+#define CONNECTSPD_LS         2
+#define CONNECTSPD_FS48       3
+#define CONNECTSPD_SS         4
+
+#define DGCMD_CMDACT          (1U << 10)
+#define DGCMD_ALLFIFOFLUSH    0x0A
+
+#define DEPCMD_PARAM(x)       ((x) << 16)
+#define DEPCMD_XFERRSCIDX(x)  (((x) >> 16) & 0x7F)
+#define DEPCMD_STATUS(x)      (((x) >> 12) & 0xF)
+#define DEPCMD_HIPRI_FORCERM  (1U << 11)
+#define DEPCMD_CMDACT         (1U << 10)
+#define DEPCMD_CMDIOC         (1U << 8)
+#define DEPCMD_DEPCFG         0x1
+#define DEPCMD_DEPXFERCFG     0x2
+#define DEPCMD_DEPSSTALL      0x4
+#define DEPCMD_DEPCSTALL      0x5
+#define DEPCMD_DEPSTRTXFER    0x6
+#define DEPCMD_DEPENDXFER     0x8
+#define DEPCMD_DEPSTARTCFG    0x9
+
+#define DEPCFG0_CFGACTION(x)  ((x) << 30)
+#define DEPCFG0_FIFONUM(x)    ((x) << 17)
+#define DEPCFG0_MPS(x)        ((x) << 3)
+#define DEPCFG0_EPTYPE(x)     ((x) << 1)
+#define DEPCFG1_EPNUM(x)      ((x) << 26)
+#define DEPCFG1_EPDIR         (1U << 25)
+#define DEPCFG1_XFERNRDYEN    (1U << 10)
+#define DEPCFG1_XFERCMPLEN    (1U << 8)
+#define DEPXFERCFG0_NUMXFERRES(x) (x)
+
+//
+// TRB (16 bytes, 16-byte aligned).
+//
+typedef struct {
+  UINT32  BufLo;
+  UINT32  BufHi;
+  UINT32  Size;     // BUFSIZ[23:0], TRBSTS[31:28]
+  UINT32  Ctrl;
+} DWC3_TRB;
+
+#define TRB_SIZE_MASK         0x00FFFFFFU
+#define TRB_CTRL_IOC          (1U << 11)
+#define TRB_CTRL_ISP_IMI      (1U << 10)
+#define TRB_CTRL_TRBCTL(x)    ((x) << 4)
+#define TRB_CTRL_CHN          (1U << 2)
+#define TRB_CTRL_LST          (1U << 1)
+#define TRB_CTRL_HWO          (1U << 0)
+
+#define TRBCTL_NORMAL         1
+#define TRBCTL_CONTROL_SETUP  2
+#define TRBCTL_CONTROL_STATUS2 3
+#define TRBCTL_CONTROL_STATUS3 4
+#define TRBCTL_CONTROL_DATA   5
+
+//
+// Events.
+//
+#define EVT_IS_DEVICE(e)      (((e) & 1) != 0)
+#define EVT_DEVT_TYPE(e)      (((e) >> 1) & 0x7F)   // 0 = device event
+
+#define DEPEVT_EPNUM(e)       (((e) >> 1) & 0x1F)
+#define DEPEVT_TYPE(e)        (((e) >> 6) & 0xF)
+#define DEPEVT_XFERCOMPLETE   1
+#define DEPEVT_XFERNOTREADY   3
+#define DEPEVT_CMDCMPLT       7
+#define DEPEVT_STATUS(e)      (((e) >> 12) & 0xF)
+#define DEPEVT_CTL_STATUS(e)  (((e) >> 12) & 0x3)
+#define CTL_STATUS_SETUP      0
+#define CTL_STATUS_DATA       1
+#define CTL_STATUS_STATUS     2
+
+#define DEVT_TYPE(e)          (((e) >> 8) & 0xF)
+#define DEVT_DISCONN          0
+#define DEVT_USBRST           1
+#define DEVT_CONNECTDONE      2
+#define DEVT_ULSTCHNG         3
+#define DEVT_WKUP             4
+#define DEVT_EVNTOVERFLOW     11
+#define DEVT_LINKSTATE(e)     (((e) >> 16) & 0xF)
+#define LINKSTATE_U3          3     // HS: suspend (L2)
+#define LINKSTATE_U0          0     // HS: on (L0)
 
 //
 // Bring-up self test (SelfTest.c): the driver starts itself and runs a bulk
@@ -154,6 +226,7 @@
 #define USBFN_EP0_MPS          64
 #define USBFN_MAX_TRANSFER     (64 * 1024)
 #define USBFN_EVENT_QUEUE      32
+#define USBFN_EP0_BUFFER       512
 
 //
 // Identity reported by GetVendorIdProductId / GetDeviceInfo.  pid.codes test
@@ -164,23 +237,38 @@
 #define USBFN_PID              0x0001
 
 //
-// Port routing on v1awifi: the micro-USB data lines are handled by the kernel's
-// MUIC/DRD path.  For the first bring-up we leave the port at whatever the
-// bootloader left it in (device mode) and only bring up the DWC2 core + USB2
-// PHY; if the host does not enumerate we will add MUIC routing here.
+// DMA pool layout (one allocation, page aligned).  Each TRB pair gets its own
+// 64-byte cache line so a clean of one never touches another the core owns.
 //
+#define DWC3_EVENT_BUFFER_SIZE 4096
+#define DWC3_TRB_SLOT          64
+#define DWC3_PHYS_EPS          (USBFN_MAX_EPS * 2)
+#define DWC3_BOUNCE_SIZE       USBFN_MAX_TRANSFER
+
+//
+// EP0 control transfer state.
+//
+typedef enum {
+  Ep0StateIdle = 0,         // no SETUP armed (before start / after stop)
+  Ep0StateSetup,            // SETUP TRB armed on physical EP0
+  Ep0StateData,             // data stage expected / in flight
+  Ep0StateWaitStatus,       // waiting for XferNotReady(Status)
+  Ep0StateStatus            // status TRB in flight
+} EP0_STATE;
 
 //
 // One transfer per endpoint and direction.
 //
 typedef struct {
-  BOOLEAN    Active;
+  BOOLEAN    Active;      // client transfer owned by this endpoint
   BOOLEAN    Internal;    // EP0 data stage owned by the driver, not reported
   BOOLEAN    SendZlp;     // EP0 IN: terminate a max-packet-multiple reply
-  UINT8      *Buffer;
-  UINTN      Length;
-  UINTN      Done;        // bytes moved through the FIFO so far
-  UINTN      Queued;      // EP0 IN: bytes of the packet in flight
+  BOOLEAN    Started;     // TRB handed to the core (StartXfer issued)
+  UINT8      *Buffer;     // client buffer
+  UINTN      Length;      // client length
+  UINTN      Programmed;  // bytes in the TRB (OUT: rounded up to MPS)
+  UINTN      Done;        // bytes actually moved
+  UINT8      Resource;    // XferRscIdx from StartXfer, for EndXfer
 } USBFN_XFER;
 
 typedef struct {
@@ -198,6 +286,8 @@ typedef struct {
   BOOLEAN                   Started;
   EFI_USB_BUS_SPEED         Speed;
   UINT8                     Configuration;
+  BOOLEAN                   EpsConfigured;    // DEPCFG done for EP1..3
+  UINT16                    Release;          // GSNPSID release (e.g. 0x210a)
 
   EFI_USB_DEVICE_INFO       *DeviceInfo;
   UINT8                     *ConfigBlob;      // full configuration descriptor
@@ -207,9 +297,30 @@ typedef struct {
   USBFN_XFER                Out[USBFN_MAX_EPS];
   UINT8                     EpType[USBFN_MAX_EPS];   // USB_ENDPOINT_* per number
   UINT16                    EpMps[USBFN_MAX_EPS];
+  UINT8                     EpDirs[USBFN_MAX_EPS];   // EP_DIR_OUT | EP_DIR_IN
+  BOOLEAN                   Halted[DWC3_PHYS_EPS];
 
-  UINT32                    SetupWords[2];    // SETUP packet from the RX FIFO
-  UINT8                     Ep0Buffer[256];   // driver-answered EP0 replies
+  //
+  // EP0 control state machine.
+  //
+  EP0_STATE                 Ep0State;
+  BOOLEAN                   Ep0ThreeStage;    // wLength != 0
+  BOOLEAN                   Ep0DirIn;         // data stage direction
+  BOOLEAN                   Ep0StatusReady;   // status may be started
+  BOOLEAN                   Ep0StatusPending; // XferNotReady(Status) seen
+  UINT8                     Ep0StatusPhys;    // physical EP of that event
+  UINT8                     Ep0Buffer[USBFN_EP0_BUFFER];   // driver replies
+
+  //
+  // DMA pool.
+  //
+  UINT8                     *Pool;
+  UINTN                     PoolPages;
+  UINT32                    *EventBuffer;
+  UINTN                     EventIndex;       // next event, in bytes
+  DWC3_TRB                  *Trb[DWC3_PHYS_EPS];      // 2 TRBs per slot
+  UINT8                     *Bounce[DWC3_PHYS_EPS];   // EP0: USBFN_EP0_BUFFER
+  UINT8                     *SetupBuffer;             // 8-byte SETUP target
 
   USBFN_EVENT               Queue[USBFN_EVENT_QUEUE];
   UINTN                     QueueHead;
@@ -223,86 +334,124 @@ typedef struct {
 #define USBFN_SIGNATURE    SIGNATURE_32 ('U', 'F', 'N', 'D')
 #define USBFN_FROM_THIS(a) CR (a, USBFN_DEV, UsbFnIo, USBFN_SIGNATURE)
 
-//
-// Board.c
-//
-EFI_STATUS
-UsbBoardInit (
-  VOID
-  );
+#define PHYS_EP(Ep, In)    ((UINT8)(((Ep) << 1) | ((In) ? 1 : 0)))
+#define EP_DIR_OUT         (1U << 0)
+#define EP_DIR_IN          (1U << 1)
 
 //
-// Dwc2.c
+// Board.c: clocks + DRD0 PHY.
 //
 EFI_STATUS
-Dwc2CoreInit (
+UsbBoardClockInit (
   VOID
   );
 
 VOID
-Dwc2Connect (
-  IN BOOLEAN  Connect
+UsbBoardPhyInit (
+  VOID
   );
 
 VOID
-Dwc2BusReset (
+UsbBoardPhyTune (
+  VOID
+  );
+
+VOID
+UsbBoardPhyCrWrite (
+  IN UINT16  Address,
+  IN UINT16  Data
+  );
+
+VOID
+UsbBoardPhyExit (
+  VOID
+  );
+
+//
+// Dwc3.c
+//
+EFI_STATUS
+Dwc3AllocatePool (
+  IN USBFN_DEV  *Dev
+  );
+
+EFI_STATUS
+Dwc3CoreInit (
   IN USBFN_DEV  *Dev
   );
 
 VOID
-Dwc2Ep0ArmOut (
+Dwc3Connect (
+  IN USBFN_DEV  *Dev,
+  IN BOOLEAN    Connect
+  );
+
+VOID
+Dwc3Shutdown (
+  IN USBFN_DEV  *Dev
+  );
+
+BOOLEAN
+Dwc3EventPending (
   VOID
   );
 
 VOID
-Dwc2SetAddress (
+Dwc3ServiceEvents (
+  IN USBFN_DEV  *Dev
+  );
+
+VOID
+Dwc3SetAddress (
   IN UINT8  Address
   );
 
 VOID
-Dwc2ActivateEndpoints (
+Dwc3ActivateEndpoints (
+  IN USBFN_DEV  *Dev
+  );
+
+EFI_STATUS
+Dwc3StartTransfer (
+  IN USBFN_DEV  *Dev,
+  IN UINT8      Ep,
+  IN BOOLEAN    In
+  );
+
+VOID
+Dwc3SetStall (
+  IN USBFN_DEV  *Dev,
+  IN UINT8      Ep,
+  IN BOOLEAN    In,
+  IN BOOLEAN    Stall
+  );
+
+BOOLEAN
+Dwc3GetStall (
+  IN USBFN_DEV  *Dev,
+  IN UINT8      Ep,
+  IN BOOLEAN    In
+  );
+
+VOID
+Dwc3Ep0Stall (
   IN USBFN_DEV  *Dev
   );
 
 VOID
-Dwc2StartIn (
+Dwc3Ep0StatusReady (
+  IN USBFN_DEV  *Dev
+  );
+
+VOID
+Dwc3AbortEp (
   IN USBFN_DEV  *Dev,
-  IN UINT8      Ep
-  );
-
-VOID
-Dwc2StartOut (
-  IN USBFN_DEV  *Dev,
-  IN UINT8      Ep
-  );
-
-VOID
-Dwc2FillTxFifo (
-  IN USBFN_DEV  *Dev,
-  IN UINT8      Ep
-  );
-
-VOID
-Dwc2SetStall (
-  IN UINT8    Ep,
-  IN BOOLEAN  In,
-  IN BOOLEAN  Stall
-  );
-
-BOOLEAN
-Dwc2GetStall (
-  IN UINT8    Ep,
-  IN BOOLEAN  In
-  );
-
-VOID
-Dwc2AbortEp (
-  IN UINT8    Ep,
-  IN BOOLEAN  In
+  IN UINT8      Ep,
+  IN BOOLEAN    In
   );
 
 //
-// UsbFnDxe.c: interrupt service.
+// UsbFnDxe.c: callbacks from the event handler.
 //
 VOID
 UsbFnQueueEvent (
@@ -312,8 +461,16 @@ UsbFnQueueEvent (
   );
 
 VOID
-UsbFnServiceInterrupt (
-  IN USBFN_DEV  *Dev
+UsbFnQueueTransfer (
+  IN USBFN_DEV  *Dev,
+  IN UINT8      Ep,
+  IN BOOLEAN    In
+  );
+
+VOID
+UsbFnEp0Setup (
+  IN USBFN_DEV                     *Dev,
+  IN CONST EFI_USB_DEVICE_REQUEST  *Req
   );
 
 #endif // __USBFN_DXE_H__

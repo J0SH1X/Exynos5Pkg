@@ -1,16 +1,19 @@
 /** @file
-  v1awifi board glue for the USB device port: switch the shared USB2.0 PHY
-  to device mode and bring up the UOTG PHY for 24 MHz XusbXTI.
+  v1awifi board glue for the USB device port: clocks and the USB3.0 DRD0
+  PHY (0x12100000) that feeds the DWC3 core at 0x12000000.
 
-  The 5420 has one shared USB2.0 PHY (HSPHY at 0x12130000) serving both the
-  host controller and the UOTG (device) controller.  USB_CFG selects which
-  role the PHY drives (1 = host, 0 = device) and the PHY must be powered and
-  out of reset before the DWC2 core at 0x12140000 will enumerate.
+  The Samsung bootloader does not leave USB in a known state (download mode
+  uses it, a normal boot does not), so everything is brought up from
+  scratch.  Sequences follow the downstream kernel:
 
-  Register sequence follows the kernel's exynos_usb_dev_phy20_init()
-  -> exynos5_usb_phy20_init() + exynos_usb_mux_change(0) for a device-mode
-  bring-up with the 24 MHz reference clock (mach-universal5420.c:
-  clk_xusbxti.rate = 24000000).
+    clock-exynos5420.c   "usbdrd30" (exynos-dwc3.0): CLK_GATE_IP_FSYS bits
+                         19 + 25; "sclk_usbdrd30"/"sclk_usbphy30": mux
+                         CLK_SRC_FSYS[22:20], dividers CLK_DIV_FSYS0[27:24]
+                         and [19:16]
+    setup-usb-phy.c      exynos5_usb_phy30_init(), exynos5_usb_phy30_tune()
+                         (peripheral branch), exynos5_usb_phy_crport_ctrl()
+
+  Reference clock: 24 MHz XusbXTI (mach-universal5420.c).
 
   SPDX-License-Identifier: BSD-2-Clause-Patent
 **/
@@ -18,117 +21,208 @@
 #include "UsbFnDxe.h"
 
 //
-// PMU / syscon / PHY (map.h + regs-pmu.h + regs-usb-phy.h).
+// CMU (EXYNOS5_PA_CMU = 0x10010000, regs-clock.h offsets).
 //
-#define PMU_BASE                 0x10040000
-#define USBHOST_PHY_CONTROL      (PMU_BASE + 0x070C)  // EXYNOS5 (not 5250)
-#define USBHOST_PHY_ENABLE       (1u << 0)
+#define CMU_BASE                 0x10010000
+#define CLK_SRC_FSYS             (CMU_BASE + 0x10244)
+#define CLK_SRC_MASK_FSYS        (CMU_BASE + 0x10340)
+#define CLK_DIV_FSYS0            (CMU_BASE + 0x10548)
+#define CLK_GATE_IP_FSYS         (CMU_BASE + 0x10944)
 
-#define SYSCON_BASE              0x10050100           // EXYNOS5_PA_SYSCON
-#define USB_CFG                  (SYSCON_BASE + 0x230) // 1 = host, 0 = device
-
-#define PHY_BASE                 0x12130000           // EXYNOS5_PA_HSPHY
-#define HOST_CTRL0               (PHY_BASE + 0x00)
-#define OTG_SYS                  (PHY_BASE + 0x38)
-
-//
-// HOST_CTRL0 bits (regs-usb-phy.h).
-//
-#define HOST_CTRL0_FSEL_MASK     (0x7u << 16)
-#define HOST_CTRL0_CLKSEL_24M    (0x5u << 16)         // EXYNOS5_CLKSEL_24M
-#define HOST_CTRL0_COMMONON_N    (1u << 9)
-#define HOST_CTRL0_FORCESLEEP    (1u << 5)
-#define HOST_CTRL0_FORCESUSPEND  (1u << 4)
-#define HOST_CTRL0_SIDDQ         (1u << 6)
-#define HOST_CTRL0_UTMISWRST     (1u << 2)
-#define HOST_CTRL0_LINKSWRST     (1u << 1)
-#define HOST_CTRL0_PHYSWRSTALL   (1u << 31)
-#define HOST_CTRL0_PHYSWRST      (1u << 0)
+#define SRC_FSYS_USBDRD30_MASK   (0x7u << 20)     // 0 = XXTI (24 MHz)
+#define SRC_MASK_FSYS_USBDRD30   (1u << 20)
+#define DIV_FSYS0_USBDRD30_MASK  (0xFu << 24)
+#define DIV_FSYS0_USBPHY30_MASK  (0xFu << 16)
+#define GATE_IP_FSYS_USBDRD30_0  ((1u << 19) | (1u << 25))
 
 //
-// OTG_SYS bits (regs-usb-phy.h).
+// PMU: DRD0 PHY isolation (regs-pmu.h EXYNOS5_USBDEV_PHY_CONTROL).
 //
-#define OTG_SYS_CTRL0_FSEL_MASK  (0x7u << 4)
-#define OTG_SYS_CLKSEL_24M       (0x5u << 4)          // EXYNOS5_CLKSEL_24M
-#define OTG_SYS_COMMON_ON        (1u << 7)
-#define OTG_SYS_FORCE_SLEEP      (1u << 3)
-#define OTG_SYS_SIDDQ_UOTG       (1u << 1)
-#define OTG_SYS_FORCE_SUSPEND    (1u << 0)
-#define OTG_SYS_OTGDISABLE       (1u << 2)
-#define OTG_SYS_REF_CLK_SEL_MASK (0x3u << 9)
-#define OTG_SYS_REF_CLK_SEL_2    (0x2u << 9)
-#define OTG_SYS_PHYLINK_SW_RESET (1u << 14)
-#define OTG_SYS_LINK_SW_RST_UOTG (1u << 13)
-#define OTG_SYS_PHY0_SW_RST      (1u << 12)
+#define PMU_USBDEV_PHY_CONTROL   0x10040704
+#define PMU_PHY_ENABLE           (1u << 0)
+
+//
+// DRD PHY registers (regs-usb3-drd-phy.h).
+//
+#define PHY(x)                   (DWC3_PHY_BASE + (x))
+#define PHY_LINKSYSTEM           0x04
+#define PHY_UTMI                 0x08
+#define PHY_CLKRST               0x10
+#define PHY_REG0                 0x14
+#define PHY_REG1                 0x18
+#define PHY_PARAM0               0x1C
+#define PHY_PARAM1               0x20
+#define PHY_TEST                 0x28
+#define PHY_BATCHG               0x30
+#define PHY_RESUME               0x34
+
+#define LINKSYSTEM_XHCI_VERSION_CONTROL (1u << 27)
+#define LINKSYSTEM_FLADJ(x)      ((x) << 1)
+
+#define UTMI_OTGDISABLE          (1u << 6)
+#define UTMI_FORCESUSPEND        (1u << 1)
+#define UTMI_FORCESLEEP          (1u << 0)
+
+#define CLKRST_SSC_REF_CLK_SEL(x) ((x) << 23)
+#define CLKRST_SSC_EN            (1u << 20)
+#define CLKRST_REF_SSP_EN        (1u << 19)
+#define CLKRST_MPLL_MULTIPLIER(x) ((x) << 11)
+#define CLKRST_FSEL(x)           ((x) << 5)
+#define CLKRST_RETENABLEN        (1u << 4)
+#define CLKRST_REFCLKSEL(x)      ((x) << 2)
+#define CLKRST_PORTRESET         (1u << 1)
+#define CLKRST_COMMONONN         (1u << 0)
+
+#define CLKSEL_24M               0x5             // EXYNOS5_CLKSEL_24M
+
+#define REG0_CR_WRITE            (1u << 19)
+#define REG0_CR_DATA_IN(x)       ((x) << 2)
+#define REG0_CR_CAP_DATA         (1u << 1)
+#define REG0_CR_CAP_ADDR         (1u << 0)
+#define REG1_CR_ACK              (1u << 0)
+
+#define TEST_POWERDOWN_SSP       (1u << 3)
+#define TEST_POWERDOWN_HSP       (1u << 2)
+
+#define PARAM0_SQRXTUNE_MASK     (0x7u << 6)
+#define PARAM0_SQRXTUNE(x)       ((x) << 6)
+#define PARAM0_TXVREFTUNE_MASK   (0xFu << 22)
+#define PARAM0_TXVREFTUNE(x)     ((x) << 22)
 
 /**
-  Switch the shared PHY to device mode, power it and take it out of reset.
+  Gate the DRD0 link/PHY clocks on and run the suspend/PHY reference clocks
+  straight from the 24 MHz crystal (Dwc3.c programs GCTL.PwrDnScale for it).
 **/
-STATIC
 EFI_STATUS
-UsbPhyInit (
+UsbBoardClockInit (
+  VOID
+  )
+{
+  MmioAnd32 (CLK_SRC_FSYS, ~SRC_FSYS_USBDRD30_MASK);
+  MmioAnd32 (CLK_DIV_FSYS0, ~(DIV_FSYS0_USBDRD30_MASK | DIV_FSYS0_USBPHY30_MASK));
+  MmioOr32 (CLK_SRC_MASK_FSYS, SRC_MASK_FSYS_USBDRD30);
+  MmioOr32 (CLK_GATE_IP_FSYS, GATE_IP_FSYS_USBDRD30_0);
+  return EFI_SUCCESS;
+}
+
+/**
+  exynos5_usb_phy30_init() for DRD0, 24 MHz reference.
+  Called with the DWC3 core and both PHY interfaces held in soft reset.
+**/
+VOID
+UsbBoardPhyInit (
   VOID
   )
 {
   UINT32  Reg;
 
-  //
-  // USB_CFG = 0: device mode (exynos_usb_mux_change(pdev, 0)).
-  //
-  MmioWrite32 (USB_CFG, 0);
+  MmioWrite32 (PMU_USBDEV_PHY_CONTROL, PMU_PHY_ENABLE);
 
-  //
-  // Power the shared USB2.0 PHY.
-  //
-  MmioWrite32 (USBHOST_PHY_CONTROL, USBHOST_PHY_ENABLE);
+  MmioWrite32 (PHY (PHY_REG0), 0x00000000);
+  MmioWrite32 (PHY (PHY_PARAM0), 0x24d4e6e4);
+  MmioWrite32 (PHY (PHY_RESUME), 0x00000000);
 
-  //
-  // UOTG PHY reset sequence (otgphy_sys) for 24 MHz reference clock.
-  //
-  Reg = MmioRead32 (OTG_SYS);
-  Reg &= ~OTG_SYS_CTRL0_FSEL_MASK;
-  Reg |= OTG_SYS_CLKSEL_24M;
-  Reg |= OTG_SYS_COMMON_ON;                       // not 5250: common on
-  Reg &= ~(OTG_SYS_FORCE_SUSPEND | OTG_SYS_SIDDQ_UOTG | OTG_SYS_FORCE_SLEEP);
-  Reg &= ~OTG_SYS_REF_CLK_SEL_MASK;
-  Reg |= OTG_SYS_REF_CLK_SEL_2 | OTG_SYS_OTGDISABLE;
-  Reg |= OTG_SYS_PHY0_SW_RST | OTG_SYS_LINK_SW_RST_UOTG |
-         OTG_SYS_PHYLINK_SW_RESET;
-  MmioWrite32 (OTG_SYS, Reg);
+  MmioWrite32 (PHY (PHY_LINKSYSTEM),
+               LINKSYSTEM_XHCI_VERSION_CONTROL | LINKSYSTEM_FLADJ (0x20));
+  MmioWrite32 (PHY (PHY_PARAM1), 0x03fff020);     // not 5250
+  MmioWrite32 (PHY (PHY_BATCHG), 0x00000004);
+
+  Reg  = MmioRead32 (PHY (PHY_TEST));
+  Reg &= ~(TEST_POWERDOWN_SSP | TEST_POWERDOWN_HSP);
+  MmioWrite32 (PHY (PHY_TEST), Reg);
+
+  MmioWrite32 (PHY (PHY_UTMI), UTMI_OTGDISABLE);
+
+  Reg = CLKRST_REFCLKSEL (3) | CLKRST_FSEL (CLKSEL_24M) |
+        CLKRST_MPLL_MULTIPLIER (0x68) | CLKRST_SSC_REF_CLK_SEL (0x88) |
+        CLKRST_PORTRESET | CLKRST_RETENABLEN | CLKRST_REF_SSP_EN |
+        CLKRST_SSC_EN | CLKRST_COMMONONN;
+  MmioWrite32 (PHY (PHY_CLKRST), Reg);
   gBS->Stall (10);
-  Reg &= ~(OTG_SYS_PHY0_SW_RST | OTG_SYS_LINK_SW_RST_UOTG |
-           OTG_SYS_PHYLINK_SW_RESET);
-  MmioWrite32 (OTG_SYS, Reg);
-
-  //
-  // Host/UTMI side out of suspend/reset, link + utmi in reset then released.
-  //
-  Reg = MmioRead32 (HOST_CTRL0);
-  Reg &= ~HOST_CTRL0_FSEL_MASK;
-  Reg |= HOST_CTRL0_CLKSEL_24M;
-  Reg &= ~HOST_CTRL0_COMMONON_N;                  // keep common block on
-  Reg &= ~(HOST_CTRL0_PHYSWRST | HOST_CTRL0_PHYSWRSTALL | HOST_CTRL0_SIDDQ);
-  Reg &= ~(HOST_CTRL0_FORCESUSPEND | HOST_CTRL0_FORCESLEEP);
-  Reg |= HOST_CTRL0_LINKSWRST | HOST_CTRL0_UTMISWRST;
-  MmioWrite32 (HOST_CTRL0, Reg);
-  gBS->Stall (10);
-  Reg &= ~(HOST_CTRL0_LINKSWRST | HOST_CTRL0_UTMISWRST);
-  MmioWrite32 (HOST_CTRL0, Reg);
-
-  //
-  // PLL lock.
-  //
-  gBS->Stall (1000);
-  return EFI_SUCCESS;
+  Reg &= ~CLKRST_PORTRESET;
+  MmioWrite32 (PHY (PHY_CLKRST), Reg);
 }
 
 /**
-  Board init for the USB device port.
+  exynos5_usb_phy30_tune(), peripheral branch (non-N1A): squelch 0%,
+  TX vref +10%.
 **/
-EFI_STATUS
-UsbBoardInit (
+VOID
+UsbBoardPhyTune (
   VOID
   )
 {
-  return UsbPhyInit ();
+  UINT32  Reg;
+
+  Reg  = MmioRead32 (PHY (PHY_PARAM0));
+  Reg &= ~(PARAM0_SQRXTUNE_MASK | PARAM0_TXVREFTUNE_MASK);
+  Reg |= PARAM0_SQRXTUNE (0x3) | PARAM0_TXVREFTUNE (0xB);
+  MmioWrite32 (PHY (PHY_PARAM0), Reg);
+}
+
+STATIC
+VOID
+PhyCrHandshake (
+  IN UINT32  Reg,
+  IN UINT32  Cmd
+  )
+{
+  UINTN  Timeout;
+
+  MmioWrite32 (PHY (PHY_REG0), Reg | Cmd);
+  for (Timeout = 100; Timeout > 0; Timeout--) {
+    if (MmioRead32 (PHY (PHY_REG1)) & REG1_CR_ACK) {
+      break;
+    }
+    gBS->Stall (1);
+  }
+  if (Timeout == 0) {
+    DEBUG ((DEBUG_ERROR, "UsbFn: PHY CR handshake timeout 1 (0x%08x)\n", Reg));
+  }
+
+  MmioWrite32 (PHY (PHY_REG0), Reg);
+  for (Timeout = 100; Timeout > 0; Timeout--) {
+    if (!(MmioRead32 (PHY (PHY_REG1)) & REG1_CR_ACK)) {
+      break;
+    }
+    gBS->Stall (1);
+  }
+  if (Timeout == 0) {
+    DEBUG ((DEBUG_ERROR, "UsbFn: PHY CR handshake timeout 2 (0x%08x)\n", Reg));
+  }
+}
+
+/**
+  exynos5_usb_phy_crport_ctrl(): write one PHY control register.
+**/
+VOID
+UsbBoardPhyCrWrite (
+  IN UINT16  Address,
+  IN UINT16  Data
+  )
+{
+  UINT32  Reg;
+
+  Reg = REG0_CR_DATA_IN (Address);
+  MmioWrite32 (PHY (PHY_REG0), Reg);
+  PhyCrHandshake (Reg, REG0_CR_CAP_ADDR);
+
+  Reg = REG0_CR_DATA_IN (Data);
+  MmioWrite32 (PHY (PHY_REG0), Reg);
+  PhyCrHandshake (Reg, REG0_CR_CAP_DATA);
+  PhyCrHandshake (Reg, REG0_CR_WRITE);
+}
+
+/**
+  exynos5_usb_phy30_exit(): power the PHY down for the next OS.
+**/
+VOID
+UsbBoardPhyExit (
+  VOID
+  )
+{
+  MmioWrite32 (PHY (PHY_UTMI), UTMI_OTGDISABLE | UTMI_FORCESUSPEND | UTMI_FORCESLEEP);
+  MmioAnd32 (PHY (PHY_CLKRST), ~(CLKRST_REF_SSP_EN | CLKRST_SSC_EN | CLKRST_COMMONONN));
+  MmioOr32 (PHY (PHY_TEST), TEST_POWERDOWN_SSP | TEST_POWERDOWN_HSP);
+  MmioWrite32 (PMU_USBDEV_PHY_CONTROL, 0);
 }

@@ -67,7 +67,7 @@
   MdeModulePkg/Universal/CapsuleRuntimeDxe/CapsuleRuntimeDxe.inf
 
   #
-  # Timer: MCT global comparator 0 -> GIC INTID 136 (SPI 104).  Gives the
+  # Timer: MCT global comparator 0 -> combiner 23.3 -> GIC INTID 55.  Gives the
   # DXE Core a real tick so timed events (boot timeout, Stall, SetTimer)
   # work.
   #
@@ -82,8 +82,8 @@
   Exynos5420Pkg/Drivers/KeypadDxe/KeypadDxe.inf
 
   #
-  # USB peripheral (device mode only): EFI_USBFN_IO_PROTOCOL over the DWC2
-  # HSOTG at 0x12140000.  UsbLogDxe streams the boot log ring to a host PC.
+  # USB peripheral (device mode only): EFI_USBFN_IO_PROTOCOL over the DWC3
+  # USB3.0 DRD0 at 0x12000000.  UsbLogDxe streams the boot log ring to a host PC.
   #
   Exynos5420Pkg/Drivers/UsbFnDxe/UsbFnDxe.inf
   Exynos5420Pkg/Drivers/UsbLogDxe/UsbLogDxe.inf

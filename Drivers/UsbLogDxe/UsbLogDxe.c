@@ -166,8 +166,8 @@ UsbLogSetup (
   switch (Req->Value & 0xFF) {
     case 0:  Str = NULL;                 break;   // language ids
     case 1:  Str = L"Samsung";           break;
-    case 2:  Str = L"Galaxy Note UEFI log"; break;
-    default: Str = L"GT-N7000";          break;
+    case 2:  Str = L"Galaxy Note Pro 12.2 UEFI log"; break;
+    default: Str = L"SM-P900";           break;
   }
 
   mEp0[1] = USB_DESC_TYPE_STRING;

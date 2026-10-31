@@ -1,7 +1,7 @@
 /** @file
-  EFI_USBFN_IO_PROTOCOL for the Exynos4210 DWC2 USB device controller.
+  EFI_USBFN_IO_PROTOCOL for the Exynos5420 USB3.0 DRD0 (DWC3) controller.
 
-  The controller interrupt (GIC 103) drains the RX FIFO, refills TX FIFOs,
+  The controller interrupt (GIC 104) drains the DWC3 event buffer (Dwc3.c),
   answers the EP0 standard requests the driver owns (SET_ADDRESS,
   GET_DESCRIPTOR device/config, SET/GET_CONFIGURATION, GET_STATUS,
   CLEAR/SET_FEATURE) and queues everything the class driver must see.
@@ -12,8 +12,6 @@
 **/
 
 #include "UsbFnDxe.h"
-
-#define REG(x)  (DWC2_BASE + (x))
 
 STATIC USBFN_DEV  *mDev;
 
@@ -47,7 +45,6 @@ UsbFnQueueEvent (
   Dev->QueueHead = Next;
 }
 
-STATIC
 VOID
 UsbFnQueueTransfer (
   IN USBFN_DEV  *Dev,
@@ -99,29 +96,21 @@ Ep0Reply (
   X->Length   = Length;
   X->SendZlp  = (Length < WLength) && (Length != 0) &&
                 ((Length % USBFN_EP0_MPS) == 0);
-  Dwc2StartIn (Dev, 0);
+  if (EFI_ERROR (Dwc3StartTransfer (Dev, 0, TRUE))) {
+    X->Active = FALSE;
+  }
 }
 
+/**
+  No-data request handled: let the status stage run.
+**/
 STATIC
 VOID
 Ep0Status (
   IN USBFN_DEV  *Dev
   )
 {
-  Ep0Reply (Dev, NULL, 0, 0);
-}
-
-STATIC
-VOID
-Ep0Stall (
-  VOID
-  )
-{
-  //
-  // The core clears an EP0 stall by itself on the next SETUP.
-  //
-  Dwc2SetStall (0, TRUE, TRUE);
-  Dwc2SetStall (0, FALSE, TRUE);
+  Dwc3Ep0StatusReady (Dev);
 }
 
 /**
@@ -146,7 +135,7 @@ Ep0Standard (
 
   switch (Req->Request) {
     case USB_REQ_SET_ADDRESS:
-      Dwc2SetAddress ((UINT8)(Req->Value & 0x7F));
+      Dwc3SetAddress ((UINT8)(Req->Value & 0x7F));
       Ep0Status (Dev);
       return TRUE;
 
@@ -167,7 +156,7 @@ Ep0Standard (
           return TRUE;
         case 0x06:  // DEVICE_QUALIFIER: not dual-speed capable
         case 0x07:  // OTHER_SPEED_CONFIGURATION
-          Ep0Stall ();
+          Dwc3Ep0Stall (Dev);
           return TRUE;
         default:
           return FALSE;   // strings and class descriptors: class driver
@@ -176,7 +165,7 @@ Ep0Standard (
     case USB_REQ_SET_CONFIG:
       Dev->Configuration = (UINT8)Req->Value;
       if (Dev->Configuration != 0) {
-        Dwc2ActivateEndpoints (Dev);
+        Dwc3ActivateEndpoints (Dev);
       }
       Ep0Status (Dev);
       return TRUE;
@@ -190,7 +179,7 @@ Ep0Standard (
       if (Recipient == USB_TARGET_ENDPOINT) {
         Ep     = Req->Index & 0xF;
         Status = (Ep < USBFN_MAX_EPS) &&
-                 Dwc2GetStall (Ep, (Req->Index & 0x80) != 0) ? 1 : 0;
+                 Dwc3GetStall (Dev, Ep, (Req->Index & 0x80) != 0) ? 1 : 0;
       }
       Ep0Reply (Dev, &Status, sizeof (Status), Req->Length);
       return TRUE;
@@ -199,8 +188,8 @@ Ep0Standard (
     case USB_REQ_SET_FEATURE:
       if ((Recipient == USB_TARGET_ENDPOINT) && (Req->Value == 0)) {
         Ep = Req->Index & 0xF;
-        if (Ep < USBFN_MAX_EPS) {
-          Dwc2SetStall (Ep, (Req->Index & 0x80) != 0,
+        if ((Ep != 0) && (Ep < USBFN_MAX_EPS)) {
+          Dwc3SetStall (Dev, Ep, (Req->Index & 0x80) != 0,
                         Req->Request == USB_REQ_SET_FEATURE);
         }
       }
@@ -212,26 +201,23 @@ Ep0Standard (
   }
 }
 
-STATIC
+/**
+  SETUP received (called from the event handler): answer it here or hand it
+  to the class driver.
+**/
 VOID
-Ep0Setup (
-  IN USBFN_DEV  *Dev
+UsbFnEp0Setup (
+  IN USBFN_DEV                     *Dev,
+  IN CONST EFI_USB_DEVICE_REQUEST  *Req
   )
 {
   EFI_USBFN_MESSAGE_PAYLOAD  Payload;
 
-  //
-  // A new SETUP cancels whatever EP0 was doing.
-  //
-  ZeroMem (&Dev->In[0], sizeof (Dev->In[0]));
-  ZeroMem (&Dev->Out[0], sizeof (Dev->Out[0]));
-  CopyMem (&Payload.udr, Dev->SetupWords, sizeof (Payload.udr));
-
-  if (!Ep0Standard (Dev, &Payload.udr)) {
+  if (!Ep0Standard (Dev, Req)) {
+    ZeroMem (&Payload, sizeof (Payload));
+    CopyMem (&Payload.udr, Req, sizeof (Payload.udr));
     UsbFnQueueEvent (Dev, EfiUsbMsgSetupPacket, &Payload);
   }
-
-  Dwc2Ep0ArmOut ();
 }
 
 //
@@ -242,192 +228,6 @@ Ep0Setup (
 
 STATIC
 VOID
-RxFifoPop (
-  IN USBFN_DEV  *Dev
-  )
-{
-  UINT32      Sts;
-  UINT8       Ep;
-  UINTN       Count;
-  UINTN       Index;
-  UINT32      Word;
-  USBFN_XFER  *X;
-
-  Sts   = MmioRead32 (REG (GRXSTSP));
-  Ep    = (UINT8)GRXSTS_EPNUM (Sts);
-  Count = GRXSTS_BCNT (Sts);
-
-  switch (GRXSTS_PKTSTS (Sts)) {
-    case PKTSTS_SETUP_DATA:
-      Dev->SetupWords[0] = MmioRead32 (REG (DFIFO (0)));
-      Dev->SetupWords[1] = MmioRead32 (REG (DFIFO (0)));
-      break;
-
-    case PKTSTS_OUT_DATA:
-      X = (Ep < USBFN_MAX_EPS) ? &Dev->Out[Ep] : NULL;
-      for (Index = 0; Index < Count; Index += 4) {
-        Word = MmioRead32 (REG (DFIFO (0)));
-        if ((X != NULL) && X->Active && (X->Done < X->Length)) {
-          CopyMem (X->Buffer + X->Done, &Word,
-                   MIN (MIN (Count - Index, (UINTN)4), X->Length - X->Done));
-          X->Done += MIN (MIN (Count - Index, (UINTN)4), X->Length - X->Done);
-        }
-      }
-      if (X != NULL) {
-        X->Queued = Count;   // size of the last OUT packet
-      }
-      break;
-
-    default:
-      break;  // OUT/SETUP complete markers: handled via DOEPINT
-  }
-}
-
-STATIC
-VOID
-OutComplete (
-  IN USBFN_DEV  *Dev,
-  IN UINT8      Ep
-  )
-{
-  USBFN_XFER  *X;
-
-  X = &Dev->Out[Ep];
-  if (Ep == 0) {
-    //
-    // EP0 OUT data stage: keep going while full packets arrive and the
-    // class driver asked for more; status-stage ZLPs with no transfer
-    // pending are just consumed.
-    //
-    if (X->Active &&
-        ((X->Done >= X->Length) || (X->Queued < USBFN_EP0_MPS))) {
-      X->Active = FALSE;
-      UsbFnQueueTransfer (Dev, 0, FALSE);
-    }
-    Dwc2Ep0ArmOut ();
-    return;
-  }
-
-  if (X->Active) {
-    X->Active = FALSE;
-    UsbFnQueueTransfer (Dev, Ep, FALSE);
-  }
-}
-
-STATIC
-VOID
-InComplete (
-  IN USBFN_DEV  *Dev,
-  IN UINT8      Ep
-  )
-{
-  USBFN_XFER  *X;
-
-  X = &Dev->In[Ep];
-  if (!X->Active) {
-    return;
-  }
-
-  if (Ep == 0) {
-    X->Done += X->Queued;
-    if (X->Done < X->Length) {
-      Dwc2StartIn (Dev, 0);
-      return;
-    }
-    if (X->SendZlp) {
-      X->SendZlp = FALSE;
-      Dwc2StartIn (Dev, 0);
-      return;
-    }
-  }
-
-  X->Active = FALSE;
-  if (!X->Internal) {
-    UsbFnQueueTransfer (Dev, Ep, TRUE);
-  }
-}
-
-VOID
-UsbFnServiceInterrupt (
-  IN USBFN_DEV  *Dev
-  )
-{
-  EFI_USBFN_MESSAGE_PAYLOAD  Payload;
-  UINT32                     Sts;
-  UINT32                     Daint;
-  UINT32                     Int;
-  UINT8                      Ep;
-
-  Sts = MmioRead32 (REG (GINTSTS)) & MmioRead32 (REG (GINTMSK));
-
-  if (Sts & GINT_USBRST) {
-    MmioWrite32 (REG (GINTSTS), GINT_USBRST);
-    Dwc2BusReset (Dev);
-    UsbFnQueueEvent (Dev, EfiUsbMsgBusEventReset, NULL);
-  }
-
-  if (Sts & GINT_ENUMDONE) {
-    MmioWrite32 (REG (GINTSTS), GINT_ENUMDONE);
-    Dev->Speed = (DSTS_ENUMSPD (MmioRead32 (REG (DSTS))) == ENUMSPD_HS)
-                 ? UsbBusSpeedHigh : UsbBusSpeedFull;
-    MmioAnd32 (REG (DIEPCTL (0)), ~DEPCTL_MPS_MASK);   // EP0 MPS 64
-    MmioOr32 (REG (DCTL), DCTL_CGNPINNAK);
-    ZeroMem (&Payload, sizeof (Payload));
-    Payload.ubs = Dev->Speed;
-    UsbFnQueueEvent (Dev, EfiUsbMsgBusEventSpeed, &Payload);
-  }
-
-  if (Sts & GINT_USBSUSP) {
-    MmioWrite32 (REG (GINTSTS), GINT_USBSUSP);
-    UsbFnQueueEvent (Dev, EfiUsbMsgBusEventSuspend, NULL);
-  }
-
-  if (Sts & GINT_WKUPINT) {
-    MmioWrite32 (REG (GINTSTS), GINT_WKUPINT);
-    UsbFnQueueEvent (Dev, EfiUsbMsgBusEventResume, NULL);
-  }
-
-  //
-  // RxFLvl is a level: drain the whole FIFO before looking at the endpoint
-  // interrupts, so XferCompl always sees the data that preceded it.
-  //
-  while (MmioRead32 (REG (GINTSTS)) & GINT_RXFLVL) {
-    RxFifoPop (Dev);
-  }
-
-  if (Sts & (GINT_OEPINT | GINT_IEPINT)) {
-    Daint = MmioRead32 (REG (DAINT)) & MmioRead32 (REG (DAINTMSK));
-
-    for (Ep = 0; Ep < USBFN_MAX_EPS; Ep++) {
-      if (Daint & (1U << (16 + Ep))) {
-        Int = MmioRead32 (REG (DOEPINT (Ep)));
-        MmioWrite32 (REG (DOEPINT (Ep)), Int);
-        if ((Ep == 0) && (Int & DOEPINT_SETUP)) {
-          Ep0Setup (Dev);
-        } else if (Int & DEPINT_XFERCOMPL) {
-          OutComplete (Dev, Ep);
-        }
-      }
-
-      if (Daint & (1U << Ep)) {
-        Int = MmioRead32 (REG (DIEPINT (Ep)));
-        if (!(MmioRead32 (REG (DIEPEMPMSK)) & (1U << Ep))) {
-          Int &= ~DIEPINT_TXFE;
-        }
-        MmioWrite32 (REG (DIEPINT (Ep)), Int & ~DIEPINT_TXFE);
-        if (Int & DIEPINT_TXFE) {
-          Dwc2FillTxFifo (Dev, Ep);
-        }
-        if (Int & DEPINT_XFERCOMPL) {
-          InComplete (Dev, Ep);
-        }
-      }
-    }
-  }
-}
-
-STATIC
-VOID
 EFIAPI
 UsbFnInterruptHandler (
   IN HARDWARE_INTERRUPT_SOURCE  Source,
@@ -435,7 +235,7 @@ UsbFnInterruptHandler (
   )
 {
   mDev->IrqCount++;
-  UsbFnServiceInterrupt (mDev);
+  Dwc3ServiceEvents (mDev);
   mDev->Interrupt->EndOfInterrupt (mDev->Interrupt, Source);
 }
 
@@ -473,6 +273,7 @@ UsbFnConfigureEnableEndpoints (
   )
 {
   USBFN_DEV                    *Dev;
+  EFI_TPL                      OldTpl;
   EFI_USB_CONFIG_INFO          *Config;
   EFI_USB_INTERFACE_INFO       *Intf;
   EFI_USB_ENDPOINT_DESCRIPTOR  *EpDesc;
@@ -515,8 +316,10 @@ UsbFnConfigureEnableEndpoints (
     return EFI_OUT_OF_RESOURCES;
   }
 
+  OldTpl = gBS->RaiseTPL (TPL_HIGH_LEVEL);
   ZeroMem (Dev->EpType, sizeof (Dev->EpType));
   ZeroMem (Dev->EpMps, sizeof (Dev->EpMps));
+  ZeroMem (Dev->EpDirs, sizeof (Dev->EpDirs));
 
   Ptr = Dev->ConfigBlob;
   CopyMem (Ptr, Config->ConfigDescriptor, Config->ConfigDescriptor->Length);
@@ -532,13 +335,16 @@ UsbFnConfigureEnableEndpoints (
 
       Num              = EpDesc->EndpointAddress & 0xF;
       Dev->EpType[Num] = EpDesc->Attributes & 0x3;
-      Dev->EpMps[Num]  = EpDesc->MaxPacketSize & DEPCTL_MPS_MASK;
+      Dev->EpMps[Num]  = EpDesc->MaxPacketSize & 0x7FF;
+      Dev->EpDirs[Num] |= (EpDesc->EndpointAddress & USB_ENDPOINT_DIR_IN)
+                          ? EP_DIR_IN : EP_DIR_OUT;
     }
   }
 
   ((EFI_USB_CONFIG_DESCRIPTOR *)Dev->ConfigBlob)->TotalLength = (UINT16)Total;
   Dev->ConfigBlobLength = (UINT16)Total;
   Dev->DeviceInfo       = DeviceInfo;
+  gBS->RestoreTPL (OldTpl);
   return EFI_SUCCESS;
 }
 
@@ -587,13 +393,13 @@ UsbFnGetDeviceInfo (
 
   switch (Id) {
     case EfiUsbDeviceInfoSerialNumber:
-      Str = L"GT-N7000";
+      Str = L"SM-P900";
       break;
     case EfiUsbDeviceInfoManufacturerName:
       Str = L"Samsung";
       break;
     case EfiUsbDeviceInfoProductName:
-      Str = L"Galaxy Note";
+      Str = L"Galaxy Note Pro 12.2";
       break;
     default:
       return EFI_UNSUPPORTED;
@@ -647,7 +453,7 @@ UsbFnAbortTransfer (
   In     = (Direction == EfiUsbEndpointDirectionDeviceTx);
   OldTpl = gBS->RaiseTPL (TPL_HIGH_LEVEL);
   if (EndpointIndex != 0) {
-    Dwc2AbortEp (EndpointIndex, In);
+    Dwc3AbortEp (Dev, EndpointIndex, In);
   }
   if (In) {
     Dev->In[EndpointIndex].Active = FALSE;
@@ -671,7 +477,8 @@ UsbFnGetEndpointStallState (
   if ((EndpointIndex >= USBFN_MAX_EPS) || (State == NULL)) {
     return EFI_INVALID_PARAMETER;
   }
-  *State = Dwc2GetStall (EndpointIndex, Direction == EfiUsbEndpointDirectionDeviceTx);
+  *State = Dwc3GetStall (USBFN_FROM_THIS (This), EndpointIndex,
+                         Direction == EfiUsbEndpointDirectionDeviceTx);
   return EFI_SUCCESS;
 }
 
@@ -685,18 +492,24 @@ UsbFnSetEndpointStallState (
   IN OUT BOOLEAN                   *State
   )
 {
+  USBFN_DEV  *Dev;
+  EFI_TPL    OldTpl;
+
   if ((EndpointIndex >= USBFN_MAX_EPS) || (State == NULL)) {
     return EFI_INVALID_PARAMETER;
   }
 
-  if (EndpointIndex == 0) {
-    if (*State) {
-      Ep0Stall ();   // protocol stall of the current control transfer
-    }
-    return EFI_SUCCESS;
+  Dev = USBFN_FROM_THIS (This);
+  if (!Dev->Started) {
+    return EFI_NOT_READY;
   }
 
-  Dwc2SetStall (EndpointIndex, Direction == EfiUsbEndpointDirectionDeviceTx, *State);
+  //
+  // EP0: protocol stall of the current control transfer.
+  //
+  OldTpl = gBS->RaiseTPL (TPL_HIGH_LEVEL);
+  Dwc3SetStall (Dev, EndpointIndex, Direction == EfiUsbEndpointDirectionDeviceTx, *State);
+  gBS->RestoreTPL (OldTpl);
   return EFI_SUCCESS;
 }
 
@@ -724,10 +537,9 @@ UsbFnEventHandler (
   // Interrupts are masked here; service anything pending so a polling
   // client makes progress even if an interrupt was lost.
   //
-  if (Dev->Started &&
-      (MmioRead32 (REG (GINTSTS)) & MmioRead32 (REG (GINTMSK)))) {
+  if (Dev->Started && Dwc3EventPending ()) {
     Dev->PollCount++;
-    UsbFnServiceInterrupt (Dev);
+    Dwc3ServiceEvents (Dev);
   }
 
   if (Dev->QueueTail == Dev->QueueHead) {
@@ -767,6 +579,7 @@ UsbFnTransfer (
   USBFN_XFER  *X;
   BOOLEAN     In;
   EFI_TPL     OldTpl;
+  EFI_STATUS  Status;
 
   Dev = USBFN_FROM_THIS (This);
   if ((EndpointIndex >= USBFN_MAX_EPS) || (BufferSize == NULL) ||
@@ -787,7 +600,7 @@ UsbFnTransfer (
   In     = (Direction == EfiUsbEndpointDirectionDeviceTx);
   X      = In ? &Dev->In[EndpointIndex] : &Dev->Out[EndpointIndex];
   OldTpl = gBS->RaiseTPL (TPL_HIGH_LEVEL);
-  if (X->Active) {
+  if (X->Active || X->Started) {
     gBS->RestoreTPL (OldTpl);
     return EFI_NOT_READY;
   }
@@ -797,17 +610,17 @@ UsbFnTransfer (
   X->Buffer = Buffer;
   X->Length = *BufferSize;
 
-  if (In) {
-    Dwc2StartIn (Dev, EndpointIndex);
-  } else if (EndpointIndex != 0) {
-    Dwc2StartOut (Dev, EndpointIndex);
+  //
+  // EP0: only valid as the data stage of the current request, or as the
+  // zero-length acknowledgement of a no-data request.
+  //
+  Status = Dwc3StartTransfer (Dev, EndpointIndex, In);
+  if (EFI_ERROR (Status)) {
+    X->Active = FALSE;
   }
-  //
-  // EP0 OUT is always armed (Dwc2Ep0ArmOut); the data stage lands in X.
-  //
 
   gBS->RestoreTPL (OldTpl);
-  return EFI_SUCCESS;
+  return Status;
 }
 
 STATIC
@@ -839,7 +652,7 @@ UsbFnAllocateTransferBuffer (
   }
 
   //
-  // PIO: any memory works.
+  // Transfers go through the driver's DMA bounce buffers: any memory works.
   //
   *Buffer = AllocatePool (Size);
   return (*Buffer == NULL) ? EFI_OUT_OF_RESOURCES : EFI_SUCCESS;
@@ -869,27 +682,26 @@ UsbFnStartController (
 {
   USBFN_DEV   *Dev;
   EFI_STATUS  Status;
+  EFI_TPL     OldTpl;
 
   Dev = USBFN_FROM_THIS (This);
   if (Dev->Started) {
     return EFI_SUCCESS;
   }
 
-  Status = UsbBoardInit ();
+  OldTpl = gBS->RaiseTPL (TPL_HIGH_LEVEL);
+  Status = Dwc3CoreInit (Dev);
   if (EFI_ERROR (Status)) {
-    DEBUG ((DEBUG_ERROR, "UsbFn: board init failed - %r\n", Status));
-    return Status;
-  }
-
-  Status = Dwc2CoreInit ();
-  if (EFI_ERROR (Status)) {
+    gBS->RestoreTPL (OldTpl);
+    DEBUG ((DEBUG_ERROR, "UsbFn: controller init failed - %r\n", Status));
     return Status;
   }
 
   Dev->QueueHead = Dev->QueueTail = 0;
   Dev->Started   = TRUE;
-  Dev->Interrupt->EnableInterruptSource (Dev->Interrupt, DWC2_IRQ);
-  Dwc2Connect (TRUE);
+  Dwc3Connect (Dev, TRUE);
+  gBS->RestoreTPL (OldTpl);
+  Dev->Interrupt->EnableInterruptSource (Dev->Interrupt, DWC3_IRQ);
   return EFI_SUCCESS;
 }
 
@@ -907,9 +719,8 @@ UsbFnStopController (
     return EFI_SUCCESS;
   }
 
-  Dwc2Connect (FALSE);
-  Dev->Interrupt->DisableInterruptSource (Dev->Interrupt, DWC2_IRQ);
-  MmioWrite32 (REG (GINTMSK), 0);
+  Dev->Interrupt->DisableInterruptSource (Dev->Interrupt, DWC3_IRQ);
+  Dwc3Shutdown (Dev);
   Dev->Started = FALSE;
   return EFI_SUCCESS;
 }
@@ -1033,9 +844,8 @@ UsbFnExitBootServices (
   )
 {
   if (mDev->Started) {
-    Dwc2Connect (FALSE);
-    MmioWrite32 (REG (GINTMSK), 0);
-    MmioWrite32 (REG (GAHBCFG), 0);
+    mDev->Interrupt->DisableInterruptSource (mDev->Interrupt, DWC3_IRQ);
+    Dwc3Shutdown (mDev);
     mDev->Started = FALSE;
   }
 }
@@ -1062,15 +872,20 @@ UsbFnDxeInitialize (
     return Status;
   }
 
+  Status = Dwc3AllocatePool (mDev);
+  if (EFI_ERROR (Status)) {
+    return Status;
+  }
+
   //
   // Routed now, enabled by StartController.
   //
-  Status = mDev->Interrupt->RegisterInterruptSource (mDev->Interrupt, DWC2_IRQ,
+  Status = mDev->Interrupt->RegisterInterruptSource (mDev->Interrupt, DWC3_IRQ,
                                                      UsbFnInterruptHandler);
   if (EFI_ERROR (Status)) {
     return Status;
   }
-  mDev->Interrupt->DisableInterruptSource (mDev->Interrupt, DWC2_IRQ);
+  mDev->Interrupt->DisableInterruptSource (mDev->Interrupt, DWC3_IRQ);
 
   gBS->CreateEvent (EVT_SIGNAL_EXIT_BOOT_SERVICES, TPL_NOTIFY,
                     UsbFnExitBootServices, NULL, &mDev->ExitBootServices);
