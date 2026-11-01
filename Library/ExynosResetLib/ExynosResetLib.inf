@@ -1,4 +1,7 @@
 #
+#  ResetSystemLib for Exynos5420 (v1awifi), runtime-safe: PMU software reset,
+#  PS_HOLD power-off.  Only for DXE_RUNTIME_DRIVER (ResetSystemRuntimeDxe).
+#
 #  SPDX-License-Identifier: BSD-2-Clause-Patent
 #
 
@@ -6,9 +9,10 @@
   INF_VERSION    = 0x00010005
   BASE_NAME      = ExynosResetLib
   FILE_GUID      = 9f50d4a7-3d42-4a5c-9f1e-6a0b44120e10
-  MODULE_TYPE    = BASE
+  MODULE_TYPE    = DXE_RUNTIME_DRIVER
   VERSION_STRING = 1.0
-  LIBRARY_CLASS  = ResetSystemLib
+  LIBRARY_CLASS  = ResetSystemLib|DXE_RUNTIME_DRIVER
+  CONSTRUCTOR    = ExynosResetLibConstructor
 
 [Sources.common]
   ExynosResetLib.c
@@ -22,9 +26,14 @@
 [LibraryClasses]
   BaseLib
   DebugLib
+  DxeServicesTableLib
   IoLib
   PcdLib
-  TimerLib
+  UefiBootServicesTableLib
+  UefiRuntimeLib
+
+[Guids]
+  gEfiEventVirtualAddressChangeGuid
 
 [FixedPcd]
   gExynos5420PkgTokenSpaceGuid.PcdPmuBaseAddress

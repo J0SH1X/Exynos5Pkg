@@ -71,7 +71,6 @@
   # Platform libraries
   ArmPlatformLib|Exynos5420Pkg/Library/Exynos5420PkgLib/Exynos5420PkgLib.inf
   FrameBufferConfigLib|Exynos5420Pkg/Library/FrameBufferConfigLib/FrameBufferConfigLib.inf
-  ResetSystemLib|Exynos5420Pkg/Library/ExynosResetLib/ExynosResetLib.inf
   TimerLib|Exynos5420Pkg/Library/MctTimerLib/MctTimerLib.inf
   PlatformBootManagerLib|Exynos5420Pkg/Library/PlatformBootManagerLib/PlatformBootManagerLib.inf
 
@@ -175,6 +174,8 @@
   MemoryAllocationLib|MdePkg/Library/UefiMemoryAllocationLib/UefiMemoryAllocationLib.inf
 
 [LibraryClasses.common.DXE_RUNTIME_DRIVER]
+  # Runtime-safe (PMU as runtime MMIO): the OS restarts / powers off through it.
+  ResetSystemLib|Exynos5420Pkg/Library/ExynosResetLib/ExynosResetLib.inf
   HobLib|MdePkg/Library/DxeHobLib/DxeHobLib.inf
   MemoryAllocationLib|MdePkg/Library/UefiMemoryAllocationLib/UefiMemoryAllocationLib.inf
   ReportStatusCodeLib|MdeModulePkg/Library/RuntimeDxeReportStatusCodeLib/RuntimeDxeReportStatusCodeLib.inf
