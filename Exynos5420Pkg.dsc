@@ -78,6 +78,7 @@
   #
   Exynos5420Pkg/Drivers/GpioDxe/GpioDxe.inf
   Exynos5420Pkg/Drivers/I2CDxe/I2CDxe.inf
+  Exynos5420Pkg/Drivers/CpuFreqDxe/CpuFreqDxe.inf
   Exynos5420Pkg/Drivers/GenericKeypadDeviceDxe/GenericKeypadDeviceDxe.inf
   Exynos5420Pkg/Drivers/KeypadDxe/KeypadDxe.inf
 
