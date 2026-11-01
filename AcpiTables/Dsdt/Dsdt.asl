@@ -1,6 +1,7 @@
 /** @file
   DSDT for v1awifi (Exynos5420).  The HAL only needs the MADT and the CSRT
-  (MCT timer extension); devices are added as their Windows drivers appear
+  (MCT timer extension); processors are listed for the OS's processor
+  driver, other devices are added as their Windows drivers appear
   (~/exynos5/ExynosWinDrivers).
 
   _HIDs EXYN5xxx are ours (EXYN0xxx are the Exynos4 / GT-N7000 ones).
@@ -12,6 +13,16 @@ DefinitionBlock ("DSDT.aml", "DSDT", 2, "SAMSNG", "EXY5420 ", 1)
 {
   Scope (\_SB)
   {
+    //
+    // The four Cortex-A15 cores of cluster 0.  _UID = the MADT GICC's ACPI
+    // processor UID (= GIC CPU interface number, MpParkDxe).  The A7
+    // cluster is not used.
+    //
+    Device (CPU0) { Name (_HID, "ACPI0007") Name (_UID, 0) Method (_STA) { Return (0xF) } }
+    Device (CPU1) { Name (_HID, "ACPI0007") Name (_UID, 1) Method (_STA) { Return (0xF) } }
+    Device (CPU2) { Name (_HID, "ACPI0007") Name (_UID, 2) Method (_STA) { Return (0xF) } }
+    Device (CPU3) { Name (_HID, "ACPI0007") Name (_UID, 3) Method (_STA) { Return (0xF) } }
+
     //
     // USB3.0 DRD0 (Synopsys DWC3), peripheral mode only: the USB log and
     // debug channel (exynosdwc3).  UEFI leaves clocks and the DRD PHY up;

@@ -1,7 +1,7 @@
 #
-#  Minimal ACPI tables for v1awifi (Exynos5420): FADT, MADT, an empty DSDT
-#  and a CSRT for the MCT timer HAL extension.  Built like Exynos441xPkg's
-#  AcpiTables (RuleOverride = ACPITABLE in the FDF); AcpiPlatformDxe installs
+#  ACPI tables for v1awifi (Exynos5420): FADT, DSDT and a CSRT for the MCT
+#  timer HAL extension (the MADT is built by MpParkDxe).  Built like
+#  Exynos441xPkg's AcpiTables (RuleOverride = ACPITABLE in the FDF); AcpiPlatformDxe installs
 #  every table it finds in this file.
 #
 #  SPDX-License-Identifier: BSD-2-Clause-Patent
@@ -18,7 +18,6 @@
 [Sources]
   Dsdt/Dsdt.asl
   Fadt.aslc
-  Madt.aslc
   Csrt.aslc
   Platform.h
 

@@ -138,6 +138,7 @@ APRIORI DXE {
   INF MdeModulePkg/Universal/Acpi/AcpiTableDxe/AcpiTableDxe.inf
   INF MdeModulePkg/Universal/Acpi/AcpiPlatformDxe/AcpiPlatformDxe.inf
   INF RuleOverride = ACPITABLE Exynos5420Pkg/AcpiTables/AcpiTables.inf
+  INF Exynos5420Pkg/Drivers/MpParkDxe/MpParkDxe.inf
 
   #
   # Storage: eMMC (dw_mmc ch0) + microSD (dw_mmc ch2, only when the card-detect
