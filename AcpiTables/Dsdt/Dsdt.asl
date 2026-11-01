@@ -27,5 +27,77 @@ DefinitionBlock ("DSDT.aml", "DSDT", 2, "SAMSNG", "EXY5420 ", 1)
         Interrupt (ResourceConsumer, Level, ActiveHigh, Exclusive) { 104 }
       })
     }
+
+    //
+    // I2C0 (s3c2410-style), touchscreen bus, and hs-i2c4, S Pen bus
+    // (exynosi2c, polled).  Pins and clock gates are left set up by UEFI.
+    //
+    Device (I2C0)
+    {
+      Name (_HID, "EXYN5002")
+      Name (_UID, 0)
+      Method (_STA) { Return (0xF) }
+      Name (_CRS, ResourceTemplate () {
+        Memory32Fixed (ReadWrite, 0x12C60000, 0x00000100)
+      })
+    }
+
+    Device (HSI4)
+    {
+      Name (_HID, "EXYN5004")
+      Name (_UID, 4)
+      Method (_STA) { Return (0xF) }
+      Name (_CRS, ResourceTemplate () {
+        Memory32Fixed (ReadWrite, 0x12E00000, 0x00000100)
+      })
+    }
+
+    //
+    // GPIO interrupt lines (exynosgpio): one window over the RT and T
+    // controllers, one interrupt per bank, in bank order.
+    //   bank 0, pins 0-7:  GPD1, GPIO group interrupt SPI 78 = GSI 110
+    //   bank 1, pins 8-15: GPX3, EINT16-31 SPI 32 = GSI 64
+    //
+    Device (GPIO)
+    {
+      Name (_HID, "EXYN5003")
+      Name (_UID, 0)
+      Method (_STA) { Return (0xF) }
+      Name (_CRS, ResourceTemplate () {
+        Memory32Fixed (ReadWrite, 0x13400000, 0x00020000)
+        Interrupt (ResourceConsumer, Level, ActiveHigh, Shared) { 110 }
+        Interrupt (ResourceConsumer, Level, ActiveHigh, Shared) { 64 }
+      })
+    }
+
+    //
+    // Atmel mXT1664S touchscreen: I2C0 address 0x4A, CHG = GPD1(0), level
+    // low (board-vienna-input.c).  UEFI powers it and leaves it on.
+    //
+    Device (TSC0)
+    {
+      Name (_HID, "EXYN5005")
+      Name (_UID, 0)
+      Method (_STA) { Return (0xF) }
+      Name (_CRS, ResourceTemplate () {
+        I2cSerialBus (0x4A, ControllerInitiated, 100000, AddressingMode7Bit, "\\_SB.I2C0", 0, ResourceConsumer)
+        GpioInt (Level, ActiveLow, Exclusive, PullNone, 0, "\\_SB.GPIO") { 0 }
+      })
+    }
+
+    //
+    // Wacom G9PLL S Pen digitizer: hs-i2c4 address 0x56, IRQ = GPX3(5),
+    // rising edge (pin 13).  UEFI powers it and leaves it on.
+    //
+    Device (PEN0)
+    {
+      Name (_HID, "EXYN5006")
+      Name (_UID, 0)
+      Method (_STA) { Return (0xF) }
+      Name (_CRS, ResourceTemplate () {
+        I2cSerialBus (0x56, ControllerInitiated, 400000, AddressingMode7Bit, "\\_SB.HSI4", 0, ResourceConsumer)
+        GpioInt (Edge, ActiveHigh, Exclusive, PullNone, 0, "\\_SB.GPIO") { 13 }
+      })
+    }
   }
 }
