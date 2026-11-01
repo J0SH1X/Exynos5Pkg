@@ -261,6 +261,13 @@
   gEfiMdeModulePkgTokenSpaceGuid.PcdFirmwareVersionString|L"0.1.0"
   gEfiMdeModulePkgTokenSpaceGuid.PcdFirmwareRevision|0x00010000
 
+  #
+  # SMBIOS 3.0 records; both the 32-bit (Windows 8.1) and 64-bit entry points.
+  #
+  gEfiMdeModulePkgTokenSpaceGuid.PcdSmbiosVersion|0x0300
+  gEfiMdeModulePkgTokenSpaceGuid.PcdSmbiosDocRev|0x0
+  gEfiMdeModulePkgTokenSpaceGuid.PcdSmbiosEntryPointProvideMethod|0x3
+
   gEfiMdeModulePkgTokenSpaceGuid.PcdImageProtectionPolicy|0x00000000
   gEfiMdeModulePkgTokenSpaceGuid.PcdResetOnMemoryTypeInformationChange|FALSE
 

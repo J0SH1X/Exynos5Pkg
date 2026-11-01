@@ -80,6 +80,8 @@
   Exynos5420Pkg/Drivers/I2CDxe/I2CDxe.inf
   Exynos5420Pkg/Drivers/CpuFreqDxe/CpuFreqDxe.inf
   Exynos5420Pkg/Drivers/MpParkDxe/MpParkDxe.inf
+  MdeModulePkg/Universal/SmbiosDxe/SmbiosDxe.inf
+  Exynos5420Pkg/Drivers/SmbiosPlatformDxe/SmbiosPlatformDxe.inf
   Exynos5420Pkg/Drivers/GenericKeypadDeviceDxe/GenericKeypadDeviceDxe.inf
   Exynos5420Pkg/Drivers/KeypadDxe/KeypadDxe.inf
 

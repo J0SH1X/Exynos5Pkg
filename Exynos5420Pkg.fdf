@@ -141,6 +141,12 @@ APRIORI DXE {
   INF Exynos5420Pkg/Drivers/MpParkDxe/MpParkDxe.inf
 
   #
+  # SMBIOS: core + platform records (processor, memory, system).
+  #
+  INF MdeModulePkg/Universal/SmbiosDxe/SmbiosDxe.inf
+  INF Exynos5420Pkg/Drivers/SmbiosPlatformDxe/SmbiosPlatformDxe.inf
+
+  #
   # Storage: eMMC (dw_mmc ch0) + microSD (dw_mmc ch2, only when the card-detect
   # pin reports a card), then the disk stack (partition + FAT) on BlockIo.
   #
