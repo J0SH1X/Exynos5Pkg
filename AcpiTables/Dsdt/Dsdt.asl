@@ -29,6 +29,21 @@ DefinitionBlock ("DSDT.aml", "DSDT", 2, "SAMSNG", "EXY5420 ", 1)
     }
 
     //
+    // eMMC on dw_mmc channel 0 (exynosemmc, Storport, polled IDMAC; no
+    // interrupt).  The window includes the eMMCP security unit at +0x1000.
+    // UEFI leaves clocks, pins and power set up.
+    //
+    Device (EMMC)
+    {
+      Name (_HID, "EXYN5007")
+      Name (_UID, 0)
+      Method (_STA) { Return (0xF) }
+      Name (_CRS, ResourceTemplate () {
+        Memory32Fixed (ReadWrite, 0x12200000, 0x00002000)
+      })
+    }
+
+    //
     // I2C0 (s3c2410-style), touchscreen bus, and hs-i2c4, S Pen bus
     // (exynosi2c, polled).  Pins and clock gates are left set up by UEFI.
     //

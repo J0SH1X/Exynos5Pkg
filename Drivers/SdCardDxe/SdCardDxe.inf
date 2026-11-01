@@ -16,6 +16,8 @@
 
 [Sources.common]
   SdCardDxe.h
+  MmcHost.h
+  MmcEnv.h
   SdCardDxe.c
   MmcCore.c
   Dwmci.c

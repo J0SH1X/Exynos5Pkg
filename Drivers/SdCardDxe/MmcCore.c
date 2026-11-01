@@ -13,7 +13,7 @@
   SPDX-License-Identifier: BSD-2-Clause-Patent
 **/
 
-#include "SdCardDxe.h"
+#include "MmcHost.h"
 
 //
 // Command indices.

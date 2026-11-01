@@ -19,7 +19,7 @@
   SPDX-License-Identifier: BSD-2-Clause-Patent
 **/
 
-#include "SdCardDxe.h"
+#include "MmcHost.h"
 
 //
 // Register offsets (dw_mmc.h).
@@ -389,8 +389,8 @@ DwmciPrepareData (
     Desc    = Host->DmaDesc + Index * DESC_WORDS;
     Desc[0] = DES0_OWN | DES0_DIC | DES0_CH | ((Index == 0) ? DES0_FD : 0);
     Desc[1] = MIN (Left, (UINT32)DESC_BUF_BYTES);
-    Desc[2] = (UINT32)(UINTN)(Host->DmaBounce + Index * DESC_BUF_BYTES);
-    Desc[3] = (UINT32)(UINTN)(Desc + DESC_WORDS);
+    Desc[2] = Host->DmaBouncePhys + Index * DESC_BUF_BYTES;
+    Desc[3] = Host->DmaDescPhys + (Index + 1) * DESC_WORDS * sizeof (UINT32);
     Left   -= Desc[1];
   }
   Desc     = Host->DmaDesc + (Count - 1) * DESC_WORDS;
@@ -401,7 +401,7 @@ DwmciPrepareData (
 
   MmioWrite32 (Host->Base + DWMCI_IDSTS, IDSTS_ALL);
   MmioWrite32 (Host->Base + DWMCI_IDINTEN, 0);
-  MmioWrite32 (Host->Base + DWMCI_DBADDR, (UINT32)(UINTN)Host->DmaDesc);
+  MmioWrite32 (Host->Base + DWMCI_DBADDR, Host->DmaDescPhys);
   MmioWrite32 (Host->Base + DWMCI_TMOUT, 0xFFFFFFFFU);
   MmioWrite32 (Host->Base + DWMCI_BLKSIZ, BLOCK_SIZE);
   MmioWrite32 (Host->Base + DWMCI_BYTCNT, Bytes);
@@ -533,12 +533,14 @@ DwmciInit (
   //
   // One page of descriptors + the bounce buffer, below 4 GiB (32-bit DMA).
   //
-  Pool = AllocatePages (EFI_SIZE_TO_PAGES (EFI_PAGE_SIZE + MMC_MAX_DMA_BYTES));
+  Pool = DmaAllocatePages (EFI_SIZE_TO_PAGES (EFI_PAGE_SIZE + MMC_MAX_DMA_BYTES));
   if (Pool == NULL) {
     return EFI_OUT_OF_RESOURCES;
   }
-  Host->DmaDesc   = (UINT32 *)Pool;
-  Host->DmaBounce = Pool + EFI_PAGE_SIZE;
+  Host->DmaDesc       = (UINT32 *)Pool;
+  Host->DmaBounce     = Pool + EFI_PAGE_SIZE;
+  Host->DmaDescPhys   = DMA_ADDRESS (Host->DmaDesc);
+  Host->DmaBouncePhys = DMA_ADDRESS (Host->DmaBounce);
   ASSERT (DESC_COUNT * DESC_WORDS * sizeof (UINT32) <= EFI_PAGE_SIZE);
 
   //
