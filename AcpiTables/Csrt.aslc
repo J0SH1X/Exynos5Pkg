@@ -14,6 +14,15 @@
     - a timer descriptor (Type 2 / Subtype 0): MCT base, size, counter
       frequency, GSI of global comparator 0.
 
+  A second group, VendorId 'SAMS' / DeviceId 0x0330, for the PL330 DMA
+  extension (NtHalExts halextpl330, OSExtensionDatabase\VEN_SAMS&DEV_0330):
+  one DMA controller descriptor (Type 3 / Subtype 1) per PL330 (layout
+  shared with halextpl330.c).  ADMA0 (audio block, 0x03880000, SPI 110 =
+  GSI 142) with system request lines 0..4 = its peripherals I2S0_TX,
+  I2S0S_TX, I2S0_RX, PCM0_TX, PCM0_RX (mach-exynos dma.c adma0_peri[]), all
+  32-bit FIFOs.  Drivers name a request line + channel with FixedDMA in the
+  DSDT.  PDMA0 / PDMA1 can join with request line ranges of their own.
+
   SPDX-License-Identifier: BSD-2-Clause-Patent
 **/
 
@@ -26,6 +35,12 @@
 
 #define CSRT_RD_TYPE_TIMER     2
 #define CSRT_RD_SUBTYPE_TIMER  0
+#define CSRT_RD_TYPE_DMA                3
+#define CSRT_RD_SUBTYPE_DMA_CONTROLLER  1
+
+#define EXYNOS_ADMA0_BASE      0x03880000
+#define EXYNOS_ADMA0_SIZE      0x1000
+#define EXYNOS_ADMA0_GSI       (110 + 32)
 
 #pragma pack (1)
 //
@@ -73,9 +88,36 @@ typedef struct {
   EXYNOS_MCT_TIMER_DESCRIPTOR        Timer;
 } EXYNOS_CSRT_MCT_GROUP;
 
+//
+// halextpl330: PL330_CSRT_SHARED_INFO and PL330_CSRT_CONTROLLER.
+//
+typedef struct {
+  UINT32  Version;
+  UINT32  OsLogBase;
+  UINT32  OsLogSize;
+} EXYNOS_PL330_SHARED_INFO;
+
+typedef struct {
+  EXYNOS_CSRT_RESOURCE_DESCRIPTOR_HEADER  Header;
+  UINT32                                  BaseAddress;
+  UINT32                                  Size;
+  UINT32                                  Gsi;
+  UINT32                                  ChannelCount;
+  UINT32                                  RequestLineBase;
+  UINT32                                  RequestLineCount;
+  UINT8                                   PeripheralWidth[32];
+} EXYNOS_PL330_CONTROLLER_DESCRIPTOR;
+
+typedef struct {
+  EXYNOS_CSRT_RESOURCE_GROUP_HEADER   Header;
+  EXYNOS_PL330_SHARED_INFO            SharedInfo;
+  EXYNOS_PL330_CONTROLLER_DESCRIPTOR  Adma0;
+} EXYNOS_CSRT_PL330_GROUP;
+
 typedef struct {
   EFI_ACPI_DESCRIPTION_HEADER  Header;
   EXYNOS_CSRT_MCT_GROUP        Mct;
+  EXYNOS_CSRT_PL330_GROUP      Pl330;
 } EXYNOS_CSRT;
 #pragma pack ()
 
@@ -110,6 +152,38 @@ EXYNOS_CSRT  Csrt = {
       EXYNOS_MCT_SIZE,
       EXYNOS_MCT_FREQUENCY,
       EXYNOS_MCT_G0_GSI
+    }
+  },
+  {
+    {
+      sizeof (EXYNOS_CSRT_PL330_GROUP),       // Length
+      SIGNATURE_32 ('S', 'A', 'M', 'S'),      // VendorId
+      0,                                      // SubvendorId
+      0x0330,                                 // DeviceId
+      0,                                      // SubdeviceId
+      0,                                      // Revision
+      0,                                      // Reserved
+      sizeof (EXYNOS_PL330_SHARED_INFO)       // SharedInfoLength
+    },
+    {
+      1,                                      // Version
+      OS_LOG_BASE,
+      OS_LOG_SIZE
+    },
+    {
+      {
+        sizeof (EXYNOS_PL330_CONTROLLER_DESCRIPTOR),
+        CSRT_RD_TYPE_DMA,
+        CSRT_RD_SUBTYPE_DMA_CONTROLLER,
+        0                                     // Uid = controller id
+      },
+      EXYNOS_ADMA0_BASE,
+      EXYNOS_ADMA0_SIZE,
+      EXYNOS_ADMA0_GSI,
+      4,                                      // channels exposed
+      0,                                      // request line of peripheral 0
+      5,                                      // peripherals
+      { 4, 4, 4, 4, 4 }                       // FIFO access widths
     }
   }
 };

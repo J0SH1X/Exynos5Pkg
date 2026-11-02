@@ -122,7 +122,9 @@ APRIORI DXE {
   #
   INF Exynos5420Pkg/Drivers/GpioDxe/GpioDxe.inf
   INF Exynos5420Pkg/Drivers/I2CDxe/I2CDxe.inf
+  INF Exynos5420Pkg/Drivers/SpiDxe/SpiDxe.inf
   INF Exynos5420Pkg/Drivers/CpuFreqDxe/CpuFreqDxe.inf
+  INF Exynos5420Pkg/Drivers/BatteryDxe/BatteryDxe.inf
   INF Exynos5420Pkg/Drivers/GenericKeypadDeviceDxe/GenericKeypadDeviceDxe.inf
   INF Exynos5420Pkg/Drivers/KeypadDxe/KeypadDxe.inf
 

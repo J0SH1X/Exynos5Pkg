@@ -78,7 +78,9 @@
   #
   Exynos5420Pkg/Drivers/GpioDxe/GpioDxe.inf
   Exynos5420Pkg/Drivers/I2CDxe/I2CDxe.inf
+  Exynos5420Pkg/Drivers/SpiDxe/SpiDxe.inf
   Exynos5420Pkg/Drivers/CpuFreqDxe/CpuFreqDxe.inf
+  Exynos5420Pkg/Drivers/BatteryDxe/BatteryDxe.inf
   Exynos5420Pkg/Drivers/MpParkDxe/MpParkDxe.inf
   MdeModulePkg/Universal/SmbiosDxe/SmbiosDxe.inf
   Exynos5420Pkg/Drivers/SmbiosPlatformDxe/SmbiosPlatformDxe.inf
@@ -95,6 +97,9 @@
   # Touch test app (not in the FD: copy TouchTest.efi to a FAT volume).
   #
   Exynos5420Pkg/Application/TouchTestApp/TouchTestApp.inf
+  Exynos5420Pkg/Application/BatteryTestApp/BatteryTestApp.inf
+  Exynos5420Pkg/Application/WlanTestApp/WlanTestApp.inf
+  Exynos5420Pkg/Application/AudioTestApp/AudioTestApp.inf
 
   #
   # ACPI for Windows: FADT, MADT, empty DSDT, CSRT (MCT timer HAL extension).

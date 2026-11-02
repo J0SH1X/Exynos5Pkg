@@ -1,6 +1,6 @@
 #
 #  ACPI tables for v1awifi (Exynos5420): FADT, DSDT and a CSRT for the MCT
-#  timer HAL extension (the MADT is built by MpParkDxe).  Built like
+#  timer and PL330 DMA HAL extensions (the MADT is built by MpParkDxe).  Built like
 #  Exynos441xPkg's AcpiTables (RuleOverride = ACPITABLE in the FDF); AcpiPlatformDxe installs
 #  every table it finds in this file.
 #
