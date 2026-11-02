@@ -70,6 +70,20 @@ DefinitionBlock ("DSDT.aml", "DSDT", 2, "SAMSNG", "EXY5420 ", 1)
       })
     }
 
+    //
+    // I2C3 (s3c2410-style): the sensor bus (BMA255, BMG160, AK8963C,
+    // CM3323).  UEFI's SensorDxe sets the GPA1(2)/(3) pin functions.
+    //
+    Device (I2C3)
+    {
+      Name (_HID, "EXYN5002")
+      Name (_UID, 3)
+      Method (_STA) { Return (0xF) }
+      Name (_CRS, ResourceTemplate () {
+        Memory32Fixed (ReadWrite, 0x12C90000, 0x00000100)
+      })
+    }
+
     Device (HSI4)
     {
       Name (_HID, "EXYN5004")
@@ -92,6 +106,9 @@ DefinitionBlock ("DSDT.aml", "DSDT", 2, "SAMSNG", "EXY5420 ", 1)
     //   bank 5, pins 40-47: GPG0 (LB controller, third window), I/O only
     //   bank 6, pins 48-55: GPJ4 (LB controller), I/O only
     //   bank 7, pins 56-63: GPY7, I/O only
+    //   bank 8, pins 64-71: GPX0 pin 1 (EINT1), combiner 24 = GSI 56
+    //   bank 9, pins 72-79: GPX1 pins 2-3 (EINT10-11), combiner 29 = GSI 61
+    //   bank 10, pins 80-87: GPX1 pins 6-7 (EINT14-15), combiner 31 = GSI 63
     // The I/O-only banks get a Shared copy of bank 0's line (GpioClx binds
     // one interrupt per bank); they never enable a pin on it.
     //
@@ -112,6 +129,9 @@ DefinitionBlock ("DSDT.aml", "DSDT", 2, "SAMSNG", "EXY5420 ", 1)
         Interrupt (ResourceConsumer, Level, ActiveHigh, Shared) { 110 }  // bank 5 GPG0 (I/O only)
         Interrupt (ResourceConsumer, Level, ActiveHigh, Shared) { 110 }  // bank 6 GPJ4 (I/O only)
         Interrupt (ResourceConsumer, Level, ActiveHigh, Shared) { 110 }  // bank 7 GPY7 (I/O only)
+        Interrupt (ResourceConsumer, Level, ActiveHigh, Shared) { 56 }   // bank 8 GPX0 / combiner 24
+        Interrupt (ResourceConsumer, Level, ActiveHigh, Shared) { 61 }   // bank 9 GPX1 / combiner 29
+        Interrupt (ResourceConsumer, Level, ActiveHigh, Shared) { 63 }   // bank 10 GPX1 / combiner 31
       })
     }
 
@@ -246,6 +266,112 @@ DefinitionBlock ("DSDT.aml", "DSDT", 2, "SAMSNG", "EXY5420 ", 1)
         I2cSerialBus (0x56, ControllerInitiated, 400000, AddressingMode7Bit, "\\_SB.HSI4", 0, ResourceConsumer)
         GpioInt (Edge, ActiveHigh, Exclusive, PullNone, 0, "\\_SB.GPIO") { 13 }
       })
+    }
+
+    //
+    // Sensors on I2C3, one driver each (HID sensor minidrivers under
+    // mshidkmdf; Windows' HID sensor class driver on top).  Interrupt pins
+    // per board-universal5420-sensor.c; the chips' interrupt outputs are
+    // push-pull, active high as their drivers program them.  The Bosch
+    // data-ready outputs pulse once per sample (rising edge, as mainline's
+    // DTS); the AK8963C's DRDY stays up until the sample is read (level).
+    //
+    // BMA255 accelerometer: INT1 GPX1(3) = pin 75, INT2 GPX1(7) = pin 87.
+    Device (ACC0)
+    {
+      Name (_HID, "EXYN500C")
+      Name (_UID, 0)
+      Method (_STA) { Return (0xF) }
+      Name (_CRS, ResourceTemplate () {
+        I2cSerialBus (0x18, ControllerInitiated, 400000, AddressingMode7Bit, "\\_SB.I2C3", 0, ResourceConsumer)
+        GpioInt (Edge, ActiveHigh, Exclusive, PullDown, 0, "\\_SB.GPIO") { 75 }
+      })
+    }
+
+    // BMG160 gyroscope: INT GPX3(1) = pin 9 (DRDY GPX3(4) = pin 12 unused).
+    Device (GYR0)
+    {
+      Name (_HID, "EXYN500D")
+      Name (_UID, 0)
+      Method (_STA) { Return (0xF) }
+      Name (_CRS, ResourceTemplate () {
+        I2cSerialBus (0x68, ControllerInitiated, 400000, AddressingMode7Bit, "\\_SB.I2C3", 0, ResourceConsumer)
+        GpioInt (Edge, ActiveHigh, Exclusive, PullDown, 0, "\\_SB.GPIO") { 9 }
+      })
+    }
+
+    // AK8963C magnetometer: DRDY GPX3(3) = pin 11 (high while data is
+    // ready, cleared by reading ST2).  UEFI releases its reset GPG2(0).
+    Device (MAG0)
+    {
+      Name (_HID, "EXYN500E")
+      Name (_UID, 0)
+      Method (_STA) { Return (0xF) }
+      Name (_CRS, ResourceTemplate () {
+        I2cSerialBus (0x0C, ControllerInitiated, 400000, AddressingMode7Bit, "\\_SB.I2C3", 0, ResourceConsumer)
+        GpioInt (Level, ActiveHigh, Exclusive, PullDown, 0, "\\_SB.GPIO") { 11 }
+      })
+    }
+
+    // CM3323 RGBW light sensor: no interrupt line.
+    Device (ALS0)
+    {
+      Name (_HID, "EXYN500F")
+      Name (_UID, 0)
+      Method (_STA) { Return (0xF) }
+      Name (_CRS, ResourceTemplate () {
+        I2cSerialBus (0x10, ControllerInitiated, 100000, AddressingMode7Bit, "\\_SB.I2C3", 0, ResourceConsumer)
+      })
+    }
+
+    //
+    // Cover (hall sensor GPX0(1) = pin 65, low while the cover's magnet is
+    // there) as the ACPI lid: GPIO-signalled ACPI events on the GPIO
+    // controller (_AEI, both edges) notify LID0, whose _LID reads the pin
+    // through the GPIO operation region (GpioClx).  Windows turns the
+    // screen off / locks on close and wakes on open.
+    //
+    Scope (\_SB.GPIO)
+    {
+      Name (_AEI, ResourceTemplate () {
+        GpioInt (Edge, ActiveBoth, SharedAndWake, PullUp, 0, "\\_SB.GPIO") { 65 }
+      })
+
+      Method (_EVT, 1, Serialized)
+      {
+        If (LEqual (Arg0, 65)) {
+          Notify (\_SB.LID0, 0x80)
+        }
+      }
+
+      OperationRegion (GPOR, GeneralPurposeIo, Zero, One)
+      Field (GPOR, ByteAcc, NoLock, Preserve)
+      {
+        Connection (GpioIo (Shared, PullUp, 0, 0, IoRestrictionInputOnly, "\\_SB.GPIO") { 65 }),
+        HALL, 1,
+      }
+
+      Name (GPAV, Zero)                 // GPIO operation region usable
+      Method (_REG, 2)
+      {
+        If (LEqual (Arg0, 8)) {         // GeneralPurposeIo
+          Store (Arg1, GPAV)
+        }
+      }
+    }
+
+    Device (LID0)
+    {
+      Name (_HID, "PNP0C0D")
+      Name (_UID, 0)
+      Method (_STA) { Return (0xF) }
+      Method (_LID, 0)
+      {
+        If (LEqual (\_SB.GPIO.GPAV, One)) {
+          Return (\_SB.GPIO.HALL)      // 1: open, 0: cover closed
+        }
+        Return (One)
+      }
     }
   }
 }

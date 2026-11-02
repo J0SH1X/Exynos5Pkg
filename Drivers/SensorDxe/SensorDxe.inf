@@ -1,0 +1,37 @@
+#
+#  Sensor board setup for v1awifi: the sensor supply (MAX77802 LDO34), the
+#  I2C3 pin functions, the hall (cover) input and the AK8963C reset, left
+#  set up for the OS drivers (Windows has no pin-function control).
+#
+#  SPDX-License-Identifier: BSD-2-Clause-Patent
+#
+
+[Defines]
+  INF_VERSION    = 0x00010005
+  BASE_NAME      = Exynos5420SensorDxe
+  FILE_GUID      = 3c1f7e21-6a4d-4b0c-9c33-2a441220c021
+  MODULE_TYPE    = DXE_DRIVER
+  VERSION_STRING = 1.0
+
+  ENTRY_POINT    = SensorDxeInitialize
+
+[Sources.common]
+  SensorDxe.c
+
+[Packages]
+  MdePkg/MdePkg.dec
+  ArmPkg/ArmPkg.dec
+  Exynos5420Pkg/Exynos5420Pkg.dec
+
+[LibraryClasses]
+  BaseLib
+  DebugLib
+  IoLib
+  UefiBootServicesTableLib
+  UefiDriverEntryPoint
+
+[Protocols]
+  gExynosI2cProtocolGuid
+
+[Depex]
+  gExynosI2cProtocolGuid

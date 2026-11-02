@@ -79,6 +79,7 @@
   Exynos5420Pkg/Drivers/GpioDxe/GpioDxe.inf
   Exynos5420Pkg/Drivers/I2CDxe/I2CDxe.inf
   Exynos5420Pkg/Drivers/SpiDxe/SpiDxe.inf
+  Exynos5420Pkg/Drivers/SensorDxe/SensorDxe.inf
   Exynos5420Pkg/Drivers/CpuFreqDxe/CpuFreqDxe.inf
   Exynos5420Pkg/Drivers/BatteryDxe/BatteryDxe.inf
   Exynos5420Pkg/Drivers/MpParkDxe/MpParkDxe.inf
@@ -100,6 +101,7 @@
   Exynos5420Pkg/Application/BatteryTestApp/BatteryTestApp.inf
   Exynos5420Pkg/Application/WlanTestApp/WlanTestApp.inf
   Exynos5420Pkg/Application/AudioTestApp/AudioTestApp.inf
+  Exynos5420Pkg/Application/SensorTestApp/SensorTestApp.inf
 
   #
   # ACPI for Windows: FADT, MADT, empty DSDT, CSRT (MCT timer HAL extension).
