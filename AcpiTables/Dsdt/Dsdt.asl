@@ -9,6 +9,8 @@
   SPDX-License-Identifier: BSD-2-Clause-Patent
 **/
 
+#include "../PlatformDma.h"
+
 DefinitionBlock ("DSDT.aml", "DSDT", 2, "SAMSNG", "EXY5420 ", 1)
 {
   Scope (\_SB)
@@ -189,7 +191,9 @@ DefinitionBlock ("DSDT.aml", "DSDT", 2, "SAMSNG", "EXY5420 ", 1)
         GpioIo (Exclusive, PullNone, 0, 0, IoRestrictionOutputOnly, "\\_SB.GPIO") { 41 }   // LDOENA
         GpioIo (Exclusive, PullNone, 0, 0, IoRestrictionOutputOnly, "\\_SB.GPIO") { 48 }   // /RESET
         GpioIo (Exclusive, PullNone, 0, 0, IoRestrictionOutputOnly, "\\_SB.GPIO") { 62 }   // MAINMIC_BIAS
+#if EXYNOS_PL330_DMA
         FixedDMA (2, 0, Width32bit)                                                      // I2S0 RX capture
+#endif
         GpioInt (Level, ActiveHigh, Exclusive, PullNone, 0, "\\_SB.GPIO") { 21 }
       })
     }

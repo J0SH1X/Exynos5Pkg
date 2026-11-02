@@ -6,7 +6,7 @@
     usbdbg.py dump ADDR LEN [FILE]       raw bytes (to FILE or hex to stdout)
     usbdbg.py poke ADDR VALUE            32-bit write
     usbdbg.py reboot [normal|download|recovery]
-    usbdbg.py flash [PAYLOAD]            reboot to download mode + heimdall flash
+    usbdbg.py flash [IMAGE]              reboot to download mode + heimdall flash --BOOT
     usbdbg.py volumes                    FAT volumes (index: device path)
     usbdbg.py push LOCAL [\\PATH] [--vol N]   copy to the phone, verified by read-back
     usbdbg.py pull \\PATH LOCAL [--vol N]     copy from the phone
@@ -34,7 +34,7 @@ MAX_READ = 4096
 CHUNK = 4000          # 16 + 4000 is no multiple of 512: every request ends short
 MODES = {"normal": 0, "download": 1, "recovery": 4}
 DEFAULT_PAYLOAD = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                               "..", "Artifacts", "bootpayload.bin")
+                               "..", "Artifacts", "boot-v1awifi.img")
 
 lib = ctypes.CDLL("libusb-1.0.so.0")
 lib.libusb_open_device_with_vid_pid.restype = ctypes.c_void_p
@@ -189,7 +189,7 @@ def flash(payload):
             sys.exit("download mode device 04e8:685d did not show up")
         time.sleep(1)
     print(f"flashing {payload}")
-    subprocess.run(["heimdall", "flash", "--KERNEL", payload], check=True)
+    subprocess.run(["heimdall", "flash", "--BOOT", payload], check=True)
 
 
 def main(argv):

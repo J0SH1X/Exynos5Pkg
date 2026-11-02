@@ -29,7 +29,9 @@
 #include <Library/AcpiLib.h>
 #include <Library/PcdLib.h>
 #include <ExynosOsLog.h>
+#include <ExynosDmaPrograms.h>
 #include "Platform.h"
+#include "PlatformDma.h"
 
 #define EFI_ACPI_CSRT_REVISION  0
 
@@ -37,6 +39,8 @@
 #define CSRT_RD_SUBTYPE_TIMER  0
 #define CSRT_RD_TYPE_DMA                3
 #define CSRT_RD_SUBTYPE_DMA_CONTROLLER  1
+#define CSRT_RD_SUBTYPE_DMA_CHANNEL     0
+#define EXYNOS_ADMA0_CHANNELS           4
 
 #define EXYNOS_ADMA0_BASE      0x03880000
 #define EXYNOS_ADMA0_SIZE      0x1000
@@ -106,18 +110,33 @@ typedef struct {
   UINT32                                  RequestLineBase;
   UINT32                                  RequestLineCount;
   UINT8                                   PeripheralWidth[32];
+  UINT32                                  ProgramBase;      // channel programs, 1 KiB each
+  UINT32                                  ProgramSize;
 } EXYNOS_PL330_CONTROLLER_DESCRIPTOR;
+
+//
+// One per channel the extension registers (Type 3 / Subtype 0, Uid =
+// channel number), as Microsoft's CSRT examples list DMA channels.
+//
+typedef struct {
+  EXYNOS_CSRT_RESOURCE_DESCRIPTOR_HEADER  Header;
+  UINT32                                  ControllerUid;
+  UINT32                                  ChannelNumber;
+} EXYNOS_PL330_CHANNEL_DESCRIPTOR;
 
 typedef struct {
   EXYNOS_CSRT_RESOURCE_GROUP_HEADER   Header;
   EXYNOS_PL330_SHARED_INFO            SharedInfo;
   EXYNOS_PL330_CONTROLLER_DESCRIPTOR  Adma0;
+  EXYNOS_PL330_CHANNEL_DESCRIPTOR     Adma0Channel[EXYNOS_ADMA0_CHANNELS];
 } EXYNOS_CSRT_PL330_GROUP;
 
 typedef struct {
   EFI_ACPI_DESCRIPTION_HEADER  Header;
   EXYNOS_CSRT_MCT_GROUP        Mct;
+#if EXYNOS_PL330_DMA
   EXYNOS_CSRT_PL330_GROUP      Pl330;
+#endif
 } EXYNOS_CSRT;
 #pragma pack ()
 
@@ -154,6 +173,7 @@ EXYNOS_CSRT  Csrt = {
       EXYNOS_MCT_G0_GSI
     }
   },
+#if EXYNOS_PL330_DMA
   {
     {
       sizeof (EXYNOS_CSRT_PL330_GROUP),       // Length
@@ -180,12 +200,21 @@ EXYNOS_CSRT  Csrt = {
       EXYNOS_ADMA0_BASE,
       EXYNOS_ADMA0_SIZE,
       EXYNOS_ADMA0_GSI,
-      4,                                      // channels exposed
+      EXYNOS_ADMA0_CHANNELS,                  // channels exposed
       0,                                      // request line of peripheral 0
       5,                                      // peripherals
-      { 4, 4, 4, 4, 4 }                       // FIFO access widths
+      { 4, 4, 4, 4, 4 },                      // FIFO access widths
+      PL330_PROGRAM_BASE,
+      PL330_PROGRAM_SIZE
+    },
+    {
+      { { sizeof (EXYNOS_PL330_CHANNEL_DESCRIPTOR), CSRT_RD_TYPE_DMA, CSRT_RD_SUBTYPE_DMA_CHANNEL, 0 }, 0, 0 },
+      { { sizeof (EXYNOS_PL330_CHANNEL_DESCRIPTOR), CSRT_RD_TYPE_DMA, CSRT_RD_SUBTYPE_DMA_CHANNEL, 1 }, 0, 1 },
+      { { sizeof (EXYNOS_PL330_CHANNEL_DESCRIPTOR), CSRT_RD_TYPE_DMA, CSRT_RD_SUBTYPE_DMA_CHANNEL, 2 }, 0, 2 },
+      { { sizeof (EXYNOS_PL330_CHANNEL_DESCRIPTOR), CSRT_RD_TYPE_DMA, CSRT_RD_SUBTYPE_DMA_CHANNEL, 3 }, 0, 3 }
     }
   }
+#endif
 };
 
 //

@@ -100,6 +100,10 @@ if ! grep -q '^\*_CLANGDWARF_ARM_DEPS_FLAGS' "$TOOLS_DEF"; then
     echo "Added CLANGDWARF ARM DEPS_FLAGS to $TOOLS_DEF"
 fi
 
+# The ASL build does not track headers included from .asl files
+# (PlatformDma.h switches FixedDMA): always recompile the DSDT.
+touch "$PWD/AcpiTables/Dsdt/Dsdt.asl"
+
 # shellcheck disable=SC2086
 build -n "$(($(getconf _NPROCESSORS_ONLN) + 2))" \
       -a ARM -t CLANGDWARF \

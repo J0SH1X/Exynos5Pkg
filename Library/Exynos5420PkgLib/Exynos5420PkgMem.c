@@ -21,6 +21,7 @@
 #include <ExynosBootParams.h>
 #include <ExynosLogRing.h>
 #include <ExynosOsLog.h>
+#include <ExynosDmaPrograms.h>
 
 // The total number of descriptors, including the final "end-of-table" descriptor.
 #define MAX_VIRTUAL_MEMORY_MAP_DESCRIPTORS 12
@@ -277,6 +278,11 @@ ArmPlatformGetVirtualMemoryMap (
   // OS log ring (ExynosOsLog.h): Windows-side log, kept across warm resets.
   //
   CarveReservedRange (OS_LOG_BASE, OS_LOG_SIZE);
+
+  //
+  // PL330 DMA channel programs (ExynosDmaPrograms.h, halextpl330).
+  //
+  CarveReservedRange (PL330_PROGRAM_BASE, PL330_PROGRAM_SIZE);
 
   //
   // The bootloader's r1/r2 and ATAG list (ExynosBootParams.h), kept for a

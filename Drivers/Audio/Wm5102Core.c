@@ -394,29 +394,51 @@ ClocksUp (
   if (StartFll1 (Codec) < 0) {
     return -1;
   }
-  Wm5102Write (Codec, R_SYSTEM_CLOCK_1, SYSCLK_FREQ_24M576 | SYSCLK_ENA | SYSCLK_SRC_FLL1);
-  Wm5102Write (Codec, R_SAMPLE_RATE_1, SAMPLE_RATE_48K);
-
   //
   // AIF1: codec is BCLK / LRCLK master (SND_SOC_DAIFMT_CBM_CFM), I2S,
   // 32 BCLKs a frame (2 x 16-bit slots), slots 0 and 1 both ways.
   //
+  // Format, rates and word lengths go in while SYSCLK is still off and
+  // before the pins are mastered (like the kernel, where DAPM enables
+  // SYSCLK after hw_params): once LRCLK runs (LRCLK_FRC) the codec keeps
+  // AIF1_FORMAT and FRAME_CTRL_1/2 at their old values.
+  //
   Wm5102Write (Codec, R_AIF1_RX_ENABLES, 0);
   Wm5102Write (Codec, R_AIF1_TX_ENABLES, 0);
-  Wm5102Write (Codec, R_AIF1_BCLK_CTRL, AIF1_BCLK_MSTR | AIF1_BCLK_1M536);
-  //
-  // One LRCLK pin for both directions: TX keeps AIF1TX_LRCLK_SRC (its reset
-  // value; the kernel only updates the master / invert bits), and the RX
-  // side drives it even when only recording (LRCLK_FRC).
-  //
-  Wm5102Write (Codec, R_AIF1_TX_PIN_CTRL, AIF1TX_LRCLK_SRC | AIF1_LRCLK_MSTR);
-  Wm5102Write (Codec, R_AIF1_RX_PIN_CTRL, AIF1_LRCLK_FRC | AIF1_LRCLK_MSTR);
+  Wm5102Write (Codec, R_AIF1_RX_PIN_CTRL, 0);
+  Wm5102Write (Codec, R_AIF1_TX_PIN_CTRL, AIF1TX_LRCLK_SRC);
   Wm5102Write (Codec, R_AIF1_RATE_CTRL, 0);          // SAMPLE_RATE_1
   Wm5102Write (Codec, R_AIF1_FORMAT, AIF1_FMT_I2S);
   Wm5102Write (Codec, R_AIF1_TX_BCLK_RATE, 32);
   Wm5102Write (Codec, R_AIF1_RX_BCLK_RATE, 32);
   Wm5102Write (Codec, R_AIF1_FRAME_CTRL_1, (16u << 8) | 16);
   Wm5102Write (Codec, R_AIF1_FRAME_CTRL_2, (16u << 8) | 16);
+
+  Wm5102Write (Codec, R_SAMPLE_RATE_1, SAMPLE_RATE_48K);
+  Wm5102Write (Codec, R_SYSTEM_CLOCK_1, SYSCLK_FREQ_24M576 | SYSCLK_ENA | SYSCLK_SRC_FLL1);
+
+  //
+  // Clocks out last.  One LRCLK pin for both directions: TX keeps
+  // AIF1TX_LRCLK_SRC (its reset value; the kernel only updates the master /
+  // invert bits), and the RX side drives it even when only recording
+  // (LRCLK_FRC).
+  //
+  Wm5102Write (Codec, R_AIF1_BCLK_CTRL, AIF1_BCLK_MSTR | AIF1_BCLK_1M536);
+  Wm5102Write (Codec, R_AIF1_TX_PIN_CTRL, AIF1TX_LRCLK_SRC | AIF1_LRCLK_MSTR);
+  Wm5102Write (Codec, R_AIF1_RX_PIN_CTRL, AIF1_LRCLK_FRC | AIF1_LRCLK_MSTR);
+  {
+    UINT16  Format;
+    UINT16  Frame1;
+    UINT16  Frame2;
+
+    Wm5102Read (Codec, R_AIF1_FORMAT, &Format);
+    Wm5102Read (Codec, R_AIF1_FRAME_CTRL_1, &Frame1);
+    Wm5102Read (Codec, R_AIF1_FRAME_CTRL_2, &Frame2);
+    if ((Format != AIF1_FMT_I2S) || (Frame1 != ((16u << 8) | 16)) || (Frame2 != ((16u << 8) | 16))) {
+      DEBUG ((DEBUG_ERROR, "Wm5102: AIF1 format 0x%04x frame 0x%04x 0x%04x not taken (want 0x0002 0x1010 0x1010)\n",
+              Format, Frame1, Frame2));
+    }
+  }
   Codec->ClocksOn = TRUE;
   return 0;
 }

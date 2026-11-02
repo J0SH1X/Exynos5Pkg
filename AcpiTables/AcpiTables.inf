@@ -20,6 +20,7 @@
   Fadt.aslc
   Csrt.aslc
   Platform.h
+  PlatformDma.h
 
 [Packages]
   ArmPkg/ArmPkg.dec
