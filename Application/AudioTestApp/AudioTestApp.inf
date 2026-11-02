@@ -1,0 +1,44 @@
+#
+#  AudioTest.efi: WM5102 + I2S0/IDMA speaker test (1 kHz tone).
+#
+#  SPDX-License-Identifier: BSD-2-Clause-Patent
+#
+
+[Defines]
+  INF_VERSION    = 0x00010005
+  BASE_NAME      = AudioTest
+  FILE_GUID      = 3c1f7e21-6a4d-4b0c-9c33-54201220c015
+  MODULE_TYPE    = UEFI_APPLICATION
+  VERSION_STRING = 1.0
+
+  ENTRY_POINT    = AudioTestMain
+
+[Sources.common]
+  AudioTestApp.c
+  ../../Drivers/Audio/Wm5102Core.h
+  ../../Drivers/Audio/Wm5102Core.c
+  ../../Drivers/Audio/ExynosI2sCore.h
+  ../../Drivers/Audio/ExynosI2sCore.c
+
+[Packages]
+  MdePkg/MdePkg.dec
+  ArmPkg/ArmPkg.dec
+  Exynos5420Pkg/Exynos5420Pkg.dec
+
+[LibraryClasses]
+  BaseLib
+  BaseMemoryLib
+  CacheMaintenanceLib
+  DebugLib
+  IoLib
+  MemoryAllocationLib
+  PrintLib
+  TimerLib
+  UefiApplicationEntryPoint
+  UefiBootServicesTableLib
+  UefiLib
+
+[Protocols]
+  gEfiLoadedImageProtocolGuid
+  gExynosGpioProtocolGuid
+  gExynosSpiProtocolGuid

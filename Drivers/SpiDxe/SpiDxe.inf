@@ -1,0 +1,39 @@
+#
+#  Exynos5420 SPI driver: SPI2 (WM5102 codec) behind EXYNOS_SPI, polled.
+#  The controller code (SpiCore.c) is shared with ExynosWinDrivers/exynosspi.
+#
+#  SPDX-License-Identifier: BSD-2-Clause-Patent
+#
+
+[Defines]
+  INF_VERSION    = 0x00010005
+  BASE_NAME      = Exynos5420SpiDxe
+  FILE_GUID      = 3c1f7e21-6a4d-4b0c-9c33-2a441220c020
+  MODULE_TYPE    = DXE_DRIVER
+  VERSION_STRING = 1.0
+
+  ENTRY_POINT    = SpiDxeInitialize
+
+[Sources.common]
+  SpiDxe.c
+  SpiCore.c
+  SpiCore.h
+
+[Packages]
+  MdePkg/MdePkg.dec
+  ArmPkg/ArmPkg.dec
+  Exynos5420Pkg/Exynos5420Pkg.dec
+
+[LibraryClasses]
+  BaseLib
+  DebugLib
+  IoLib
+  TimerLib
+  UefiBootServicesTableLib
+  UefiDriverEntryPoint
+
+[Protocols]
+  gExynosSpiProtocolGuid
+
+[Depex]
+  TRUE
