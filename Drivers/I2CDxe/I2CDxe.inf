@@ -17,6 +17,8 @@
 
 [Sources.common]
   I2CDxe.c
+  GpioI2c.c
+  GpioI2c.h
   HsI2c.c
   HsI2c.h
 

@@ -1,7 +1,8 @@
 /** @file
   Exynos5420 I2C DXE driver.
 
-  Buses 4..10 are the high-speed I2C channels 0..6 (HsI2c.c).  Buses 0..3:
+  Buses 4..10 are the high-speed I2C channels 0..6 (HsI2c.c), 17 and 18
+  are bit-banged on GPIOs (GpioI2c.c).  Buses 0..3:
   polling master for the s3c2410-style I2C controllers at
   0x12C60000 + Bus * 0x10000 (EXYNOS5_PA_IIC(x) in map.h).
   Register flow follows u-boot's s3c24x0_i2c.c (drivers/i2c/
@@ -27,6 +28,7 @@
 
 #include <Protocol/ExynosI2c.h>
 
+#include "GpioI2c.h"
 #include "HsI2c.h"
 
 #define I2C_BASE(Bus)  (0x12C60000 + ((Bus) * 0x10000))
@@ -234,6 +236,12 @@ I2cXfer (
   UINTN   Tries;
 
   if ((Bus >= EXYNOS_I2C_MAX_BUS) || (Msgs == NULL) || (Num <= 0)) {
+    return -1;
+  }
+  if (Bus >= EXYNOS_I2C_FIRST_GPIO_BUS) {
+    return GpioI2cXfer (Bus, Msgs, Num);
+  }
+  if (Bus > EXYNOS_I2C_LAST_HS_BUS) {
     return -1;
   }
   if (Bus >= EXYNOS_I2C_FIRST_HS_BUS) {

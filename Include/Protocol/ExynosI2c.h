@@ -1,10 +1,12 @@
 /** @file
   Exynos I2C protocol.
 
-  Bus numbers follow Linux on Exynos5420:
+  Bus numbers follow Linux on Exynos5420 (v1awifi):
     0..3   s3c2410-style I2C at 0x12C60000 + Bus * 0x10000
     4..10  high-speed I2C (exynos5-hs-i2c) channels 0..6
            (hs-i2c3 = bus 7: MAX77802 PMIC, hs-i2c4 = bus 8: Wacom)
+    17     i2c-gpio: MAX77888 charger 0x66 / MUIC 0x25
+    18     i2c-gpio: MAX17050 fuel gauge 0x36
   All controllers are clocked by ACLK_66_PERIC (~66 MHz).
 
   Modelled on HtcLeoPkg's HtcLeoI2C protocol (Linux-style i2c_msg transfers),
@@ -26,10 +28,14 @@
   }
 
 //
-// Buses 0..3: s3c2410-style controllers; 4..10: hs-i2c channels 0..6.
+// Buses 0..3: s3c2410-style controllers; 4..10: hs-i2c channels 0..6;
+// 17, 18: bit-banged on GPIOs, numbered like the kernel's i2c-gpio buses
+// (17: MAX77888 charger/MUIC, 18: MAX17050 fuel gauge).  11..16 do not exist.
 //
-#define EXYNOS_I2C_FIRST_HS_BUS  4
-#define EXYNOS_I2C_MAX_BUS       11
+#define EXYNOS_I2C_FIRST_HS_BUS    4
+#define EXYNOS_I2C_LAST_HS_BUS     10
+#define EXYNOS_I2C_FIRST_GPIO_BUS  17
+#define EXYNOS_I2C_MAX_BUS         19
 
 //
 // Linux-style transfer flags.
