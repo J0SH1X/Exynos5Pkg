@@ -20,22 +20,30 @@
   Exynos5420Pkg/Exynos5420Pkg.dec
 
 [LibraryClasses]
+  ArmLib
   BaseLib
+  BaseMemoryLib
   BootLogoLib
   DebugLib
   DevicePathLib
   FrameBufferConfigLib
   MemoryAllocationLib
+  PrintLib
   UefiBootManagerLib
   UefiBootServicesTableLib
   UefiLib
+  UefiRuntimeServicesTableLib
 
 [Guids]
   gEfiEndOfDxeEventGroupGuid
   gUefiShellFileGuid
 
 [Protocols]
+  gExynosBatteryProtocolGuid
+  gExynosGpioProtocolGuid
+  gEfiAbsolutePointerProtocolGuid
   gEfiLoadedImageProtocolGuid
+  gEfiSimpleFileSystemProtocolGuid
   gEfiSimpleTextOutProtocolGuid
   gEfiSimpleTextInProtocolGuid
   gEfiGraphicsOutputProtocolGuid

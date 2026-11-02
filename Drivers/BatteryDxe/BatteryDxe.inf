@@ -1,0 +1,41 @@
+#
+#  v1awifi battery: MAX17050 fuel gauge + MAX77888 charger: cable-based
+#  charge limits, temperature window, recharge (UEFI only).
+#
+#  SPDX-License-Identifier: BSD-2-Clause-Patent
+#
+
+[Defines]
+  INF_VERSION    = 0x00010005
+  BASE_NAME      = Exynos5420BatteryDxe
+  FILE_GUID      = 3c1f7e21-6a4d-4b0c-9c33-54201220c012
+  MODULE_TYPE    = DXE_DRIVER
+  VERSION_STRING = 1.0
+
+  ENTRY_POINT    = BatteryDxeInitialize
+
+[Sources.common]
+  BatteryDxe.c
+  BatteryCore.c
+  BatteryCore.h
+
+[Packages]
+  ArmPkg/ArmPkg.dec
+  MdePkg/MdePkg.dec
+  Exynos5420Pkg/Exynos5420Pkg.dec
+
+[LibraryClasses]
+  BaseLib
+  BaseMemoryLib
+  DebugLib
+  IoLib
+  TimerLib
+  UefiBootServicesTableLib
+  UefiDriverEntryPoint
+
+[Protocols]
+  gExynosBatteryProtocolGuid
+  gExynosI2cProtocolGuid
+
+[Depex]
+  gExynosI2cProtocolGuid
