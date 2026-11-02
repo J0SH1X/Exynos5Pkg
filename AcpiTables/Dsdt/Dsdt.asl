@@ -325,6 +325,20 @@ DefinitionBlock ("DSDT.aml", "DSDT", 2, "SAMSNG", "EXY5420 ", 1)
     }
 
     //
+    // Internal display (exynosdisp, WDDM display-only): LSL122DL01 eDP panel
+    // on FIMD1 0x14400000 + DP1 0x145B0000, LP8556 backlight on PWM0 and the
+    // bit-banged I2C GPA2(4)/(5).  The driver maps its blocks itself (the
+    // GPIO / PMU / CMU windows are shared with other devices) and brings the
+    // panel up from cold; scanout is UEFI's GOP framebuffer.
+    //
+    Device (DISP)
+    {
+      Name (_HID, "EXYN5010")
+      Name (_UID, 0)
+      Method (_STA) { Return (0xF) }
+    }
+
+    //
     // Cover (hall sensor GPX0(1) = pin 65, low while the cover's magnet is
     // there) as the ACPI lid: GPIO-signalled ACPI events on the GPIO
     // controller (_AEI, both edges) notify LID0, whose _LID reads the pin

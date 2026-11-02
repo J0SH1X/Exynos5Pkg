@@ -102,6 +102,7 @@
   Exynos5420Pkg/Application/WlanTestApp/WlanTestApp.inf
   Exynos5420Pkg/Application/AudioTestApp/AudioTestApp.inf
   Exynos5420Pkg/Application/SensorTestApp/SensorTestApp.inf
+  Exynos5420Pkg/Application/DisplayTestApp/DisplayTestApp.inf
 
   #
   # ACPI for Windows: FADT, MADT, empty DSDT, CSRT (MCT timer HAL extension).

@@ -27,6 +27,7 @@
 
 #define GPB0_BANK       0x060      // offsets from EXYNOS_GPIO_B_BASE
 #define GPB3_BANK       0x0C0
+#define GPA2_BANK       0x040
 
 #define BANK_CON(b)     (EXYNOS_GPIO_B_BASE + (b) + 0x0)
 #define BANK_DAT(b)     (EXYNOS_GPIO_B_BASE + (b) + 0x4)
@@ -45,6 +46,7 @@ typedef struct {
 STATIC CONST GPIO_I2C_BUS  mBuses[] = {
   { GPB3_BANK, 6, GPB3_BANK, 7 },   // 17
   { GPB0_BANK, 3, GPB0_BANK, 4 },   // 18
+  { GPA2_BANK, 4, GPA2_BANK, 5 },   // 19: LP8556 backlight (the kernel's i2c-gpio bus 24)
 };
 
 STATIC BOOLEAN  mInitialised[ARRAY_SIZE (mBuses)];

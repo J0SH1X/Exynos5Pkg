@@ -50,7 +50,19 @@ Poll (
   IN VOID       *Context
   )
 {
+  STATIC UINTN           Polls;
+  EXYNOS_BATTERY_STATUS  S;
+
   BatteryCorePoll ();
+  //
+  // Once a minute to the log (USB log stream), for unattended runs: the
+  // host watches the charge level.
+  //
+  if (((Polls++ % 12) == 0) && BatteryCoreGetStatus (&S)) {
+    DEBUG ((DEBUG_INFO, "Battery: soc %u.%02u%% %u mV %d mA, input limit %u mA, charge %u mA\n",
+            S.SocCentiPercent / 100, S.SocCentiPercent % 100, S.MilliVolts, S.MilliAmps,
+            S.InputLimitMa, S.ChargeCurrentMa));
+  }
 }
 
 STATIC

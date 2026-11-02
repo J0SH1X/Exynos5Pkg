@@ -1,0 +1,42 @@
+#
+#  DisplayTest.efi: cold bring-up of the v1awifi panel with the shared
+#  display cores (panel power cycle, DP link training, FIMD1, LP8556),
+#  then full-screen colours and bars for a camera check.
+#
+#  SPDX-License-Identifier: BSD-2-Clause-Patent
+#
+
+[Defines]
+  INF_VERSION    = 0x00010005
+  BASE_NAME      = DisplayTest
+  FILE_GUID      = 3c1f7e21-6a4d-4b0c-9c33-54201220c017
+  MODULE_TYPE    = UEFI_APPLICATION
+  VERSION_STRING = 1.0
+
+  ENTRY_POINT    = DisplayTestMain
+
+[Sources.common]
+  DisplayTestApp.c
+  ../../Drivers/Display/ExynosDisplay.h
+  ../../Drivers/Display/ExynosDpCore.c
+  ../../Drivers/Display/FimdCore.c
+  ../../Drivers/Display/PanelCore.c
+
+[Packages]
+  MdePkg/MdePkg.dec
+  ArmPkg/ArmPkg.dec
+  Exynos5420Pkg/Exynos5420Pkg.dec
+
+[LibraryClasses]
+  BaseLib
+  BaseMemoryLib
+  DebugLib
+  IoLib
+  TimerLib
+  UefiApplicationEntryPoint
+  UefiBootServicesTableLib
+  UefiLib
+
+[Protocols]
+  gExynosI2cProtocolGuid
+  gEfiGraphicsOutputProtocolGuid
