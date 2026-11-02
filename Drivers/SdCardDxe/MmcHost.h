@@ -122,6 +122,15 @@ struct _MMC_HOST {
   MMC_HOST_PREPARE_DATA  PrepareData;
   MMC_HOST_XFER_BLOCK    XferBlock;
   MMC_HOST_SET_BUS_WIDTH SetBusWidth;
+
+  //
+  // Optional, for SDIO CMD53 byte transfers: block size and total byte
+  // count of the next data phase.  Zero (the default after DwmciInit) means
+  // BLOCK_SIZE and BlockCount * BLOCK_SIZE, which is all SD/MMC memory
+  // access uses.  The caller sets both, then clears them again.
+  //
+  UINT32                 BlockSize;
+  UINT32                 ByteCount;
 };
 
 //

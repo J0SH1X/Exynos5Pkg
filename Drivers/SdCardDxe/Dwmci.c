@@ -38,6 +38,14 @@
 #define DWMCI_CMD      0x2C
 #define DWMCI_RESP0    0x30
 #define DWMCI_RINTSTS  0x44
+
+//
+// RINTSTS bit 16: the SDIO card's interrupt (DAT1), owned by an SDIO
+// client's interrupt handling (exynoswlan).  The command / data paths clear
+// their own status bits only, so a pending card interrupt survives them.
+//
+#define INT_SDIO0          (1U << 16)
+#define RINTSTS_ACK(x)     ((x) & ~INT_SDIO0)
 #define DWMCI_STATUS   0x48
 #define DWMCI_FIFOTH   0x4C
 #define DWMCI_TCBCNT   0x5C
@@ -187,7 +195,7 @@ DwmciSendCmd (
     }
   }
 
-  MmioWrite32 (Host->Base + DWMCI_RINTSTS, 0xFFFFFFFFU);
+  MmioWrite32 (Host->Base + DWMCI_RINTSTS, RINTSTS_ACK (0xFFFFFFFFU));
   MmioWrite32 (Host->Base + DWMCI_CMDARG, Arg);
 
   //
@@ -226,7 +234,7 @@ DwmciSendCmd (
   for (Retry = 0; Retry < 10000; Retry++) {
     Int = MmioRead32 (Host->Base + DWMCI_RINTSTS);
     if (Int & INT_ERR) {
-      MmioWrite32 (Host->Base + DWMCI_RINTSTS, Int);
+      MmioWrite32 (Host->Base + DWMCI_RINTSTS, RINTSTS_ACK (Int));
       //
       // Identification probes time out by design (CMD8 on MMC / SD v1,
       // ACMD41 / CMD55 on an empty slot); data and stop commands must not.
@@ -342,6 +350,29 @@ DwmciSetBusWidth (
 }
 
 /**
+  Block size and total bytes of the next data phase (MMC_HOST.BlockSize /
+  ByteCount override the 512-byte memory block default).
+**/
+STATIC
+UINT32
+DataBlockSize (
+  IN MMC_HOST  *Host
+  )
+{
+  return (Host->BlockSize != 0) ? Host->BlockSize : BLOCK_SIZE;
+}
+
+STATIC
+UINT32
+DataBytes (
+  IN MMC_HOST  *Host,
+  IN UINT32    BlockCount
+  )
+{
+  return (Host->ByteCount != 0) ? Host->ByteCount : BlockCount * DataBlockSize (Host);
+}
+
+/**
   Reset the FIFO and the IDMAC, build the descriptor chain over the bounce
   buffer and arm the DMA; the data command that follows starts it.
 **/
@@ -362,7 +393,7 @@ DwmciPrepareData (
   UINT32  *Desc;
   UINTN   Retry;
 
-  Bytes = BlockCount * BLOCK_SIZE;
+  Bytes = DataBytes (Host, BlockCount);
   if ((Bytes == 0) || (Bytes > MMC_MAX_DMA_BYTES)) {
     return EFI_INVALID_PARAMETER;
   }
@@ -403,7 +434,20 @@ DwmciPrepareData (
   MmioWrite32 (Host->Base + DWMCI_IDINTEN, 0);
   MmioWrite32 (Host->Base + DWMCI_DBADDR, Host->DmaDescPhys);
   MmioWrite32 (Host->Base + DWMCI_TMOUT, 0xFFFFFFFFU);
-  MmioWrite32 (Host->Base + DWMCI_BLKSIZ, BLOCK_SIZE);
+  MmioWrite32 (Host->Base + DWMCI_BLKSIZ, DataBlockSize (Host));
+
+  //
+  // FIFO thresholds: the init value (8-entry bursts, RX watermark at half
+  // the FIFO) suits 512-byte blocks.  A small SDIO block would never reach
+  // it; like dw_mci_submit_data() for SDIO cards, use single bursts and an
+  // RX watermark of 1 for blocks under half the FIFO.
+  //
+  if (Host->BlockSize != 0) {
+    MmioWrite32 (Host->Base + DWMCI_FIFOTH, (0U << 28) | (1U << 16) | (DWMCI_FIFO_DEPTH / 2));
+  } else {
+    MmioWrite32 (Host->Base + DWMCI_FIFOTH, (2U << 28) |
+                 ((DWMCI_FIFO_DEPTH / 2 - 1) << 16) | (DWMCI_FIFO_DEPTH / 2));
+  }
   MmioWrite32 (Host->Base + DWMCI_BYTCNT, Bytes);
 
   MmioOr32 (Host->Base + DWMCI_CTRL, CTRL_USE_IDMAC);
@@ -450,7 +494,7 @@ DwmciXferBlock (
   DmaDone  = FALSE;
   Done     = Read ? IDSTS_RI : IDSTS_TI;
   LastDesc = Host->DmaDesc +
-             ((BlockCount * BLOCK_SIZE + DESC_BUF_BYTES - 1) / DESC_BUF_BYTES - 1) * DESC_WORDS;
+             ((DataBytes (Host, BlockCount) + DESC_BUF_BYTES - 1) / DESC_BUF_BYTES - 1) * DESC_WORDS;
 
   //
   // Up to ~5 s: 512 KiB at the 1-bit identification clock is ~10 s worth
@@ -476,7 +520,7 @@ DwmciXferBlock (
     gBS->Stall (10);
   }
 
-  MmioWrite32 (Host->Base + DWMCI_RINTSTS, Int);
+  MmioWrite32 (Host->Base + DWMCI_RINTSTS, RINTSTS_ACK (Int));
   DwmciStopDma (Host);
 
   if ((Int & INT_ERR) || (IdSts & IDSTS_ERR) || !(Int & INT_DTO) || !DmaDone) {
@@ -488,8 +532,8 @@ DwmciXferBlock (
   }
 
   if (Read) {
-    InvalidateDataCacheRange (Host->DmaBounce, BlockCount * BLOCK_SIZE);
-    CopyMem (Buffer, Host->DmaBounce, BlockCount * BLOCK_SIZE);
+    InvalidateDataCacheRange (Host->DmaBounce, DataBytes (Host, BlockCount));
+    CopyMem (Buffer, Host->DmaBounce, DataBytes (Host, BlockCount));
   }
   return EFI_SUCCESS;
 }
