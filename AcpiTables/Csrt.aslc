@@ -21,7 +21,9 @@
   GSI 142) with system request lines 0..4 = its peripherals I2S0_TX,
   I2S0S_TX, I2S0_RX, PCM0_TX, PCM0_RX (mach-exynos dma.c adma0_peri[]), all
   32-bit FIFOs.  Drivers name a request line + channel with FixedDMA in the
-  DSDT.  PDMA0 / PDMA1 can join with request line ranges of their own.
+  DSDT.  PDMA0 (0x121A0000, SPI 34 = GSI 66) with system request lines
+  32..63 = its peripherals 0..31 (exynos5420.dtsi: UART0 RX 13, TX 14,
+  byte FIFOs), two channels: UART0 (Bluetooth).
 
   SPDX-License-Identifier: BSD-2-Clause-Patent
 **/
@@ -45,6 +47,11 @@
 #define EXYNOS_ADMA0_BASE      0x03880000
 #define EXYNOS_ADMA0_SIZE      0x1000
 #define EXYNOS_ADMA0_GSI       (110 + 32)
+#define EXYNOS_PDMA0_CHANNELS  2
+#define EXYNOS_PDMA0_BASE      0x121A0000
+#define EXYNOS_PDMA0_SIZE      0x1000
+#define EXYNOS_PDMA0_GSI       (34 + 32)
+#define EXYNOS_PDMA0_LINE_BASE 32
 
 #pragma pack (1)
 //
@@ -129,6 +136,8 @@ typedef struct {
   EXYNOS_PL330_SHARED_INFO            SharedInfo;
   EXYNOS_PL330_CONTROLLER_DESCRIPTOR  Adma0;
   EXYNOS_PL330_CHANNEL_DESCRIPTOR     Adma0Channel[EXYNOS_ADMA0_CHANNELS];
+  EXYNOS_PL330_CONTROLLER_DESCRIPTOR  Pdma0;
+  EXYNOS_PL330_CHANNEL_DESCRIPTOR     Pdma0Channel[EXYNOS_PDMA0_CHANNELS];
 } EXYNOS_CSRT_PL330_GROUP;
 
 typedef struct {
@@ -205,13 +214,35 @@ EXYNOS_CSRT  Csrt = {
       5,                                      // peripherals
       { 4, 4, 4, 4, 4 },                      // FIFO access widths
       PL330_PROGRAM_BASE,
-      PL330_PROGRAM_SIZE
+      0x1000
     },
     {
       { { sizeof (EXYNOS_PL330_CHANNEL_DESCRIPTOR), CSRT_RD_TYPE_DMA, CSRT_RD_SUBTYPE_DMA_CHANNEL, 0 }, 0, 0 },
       { { sizeof (EXYNOS_PL330_CHANNEL_DESCRIPTOR), CSRT_RD_TYPE_DMA, CSRT_RD_SUBTYPE_DMA_CHANNEL, 1 }, 0, 1 },
       { { sizeof (EXYNOS_PL330_CHANNEL_DESCRIPTOR), CSRT_RD_TYPE_DMA, CSRT_RD_SUBTYPE_DMA_CHANNEL, 2 }, 0, 2 },
       { { sizeof (EXYNOS_PL330_CHANNEL_DESCRIPTOR), CSRT_RD_TYPE_DMA, CSRT_RD_SUBTYPE_DMA_CHANNEL, 3 }, 0, 3 }
+    },
+    {
+      {
+        sizeof (EXYNOS_PL330_CONTROLLER_DESCRIPTOR),
+        CSRT_RD_TYPE_DMA,
+        CSRT_RD_SUBTYPE_DMA_CONTROLLER,
+        1                                     // Uid = controller id
+      },
+      EXYNOS_PDMA0_BASE,
+      EXYNOS_PDMA0_SIZE,
+      EXYNOS_PDMA0_GSI,
+      EXYNOS_PDMA0_CHANNELS,
+      EXYNOS_PDMA0_LINE_BASE,                 // request line of peripheral 0
+      32,                                     // peripherals
+      { 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4,
+        1, 1 },                               // 13 / 14: UART0 RX / TX, byte FIFO
+      PL330_PROGRAM_BASE + 0x1000,
+      0x1000
+    },
+    {
+      { { sizeof (EXYNOS_PL330_CHANNEL_DESCRIPTOR), CSRT_RD_TYPE_DMA, CSRT_RD_SUBTYPE_DMA_CHANNEL, 0 }, 1, 0 },
+      { { sizeof (EXYNOS_PL330_CHANNEL_DESCRIPTOR), CSRT_RD_TYPE_DMA, CSRT_RD_SUBTYPE_DMA_CHANNEL, 1 }, 1, 1 }
     }
   }
 #endif

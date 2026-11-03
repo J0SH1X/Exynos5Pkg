@@ -10,6 +10,7 @@
 **/
 
 #include "../PlatformDma.h"
+#include "../PlatformThermal.h"
 
 DefinitionBlock ("DSDT.aml", "DSDT", 2, "SAMSNG", "EXY5420 ", 1)
 {
@@ -24,6 +25,18 @@ DefinitionBlock ("DSDT.aml", "DSDT", 2, "SAMSNG", "EXY5420 ", 1)
     Device (CPU1) { Name (_HID, "ACPI0007") Name (_UID, 1) Method (_STA) { Return (0xF) } }
     Device (CPU2) { Name (_HID, "ACPI0007") Name (_UID, 2) Method (_STA) { Return (0xF) } }
     Device (CPU3) { Name (_HID, "ACPI0007") Name (_UID, 3) Method (_STA) { Return (0xF) } }
+
+    //
+    // Power engine plugin (exynospep, boot start): processor idle / perf
+    // states for fxppm, device power coordination.  No resources yet (CPU
+    // DVFS will add the PMIC's I2C for VDD_ARM).
+    //
+    Device (PEP0)
+    {
+      Name (_HID, "EXYN5014")
+      Name (_UID, 0)
+      Method (_STA) { Return (0xF) }
+    }
 
     //
     // USB3.0 DRD0 (Synopsys DWC3), peripheral mode only: the USB log and
@@ -180,6 +193,48 @@ DefinitionBlock ("DSDT.aml", "DSDT", 2, "SAMSNG", "EXY5420 ", 1)
       Name (_CRS, ResourceTemplate () {
         Memory32Fixed (ReadWrite, 0x12210000, 0x00001000)
         Interrupt (ResourceConsumer, Level, ActiveHigh, Exclusive) { 108 }
+      })
+    }
+
+    //
+    // UART0 (exynosuart, SerCx2): the Broadcom Bluetooth controller's
+    // transport, RTS/CTS on GPA0[2]/[3] (the driver muxes GPA0[0..3] and
+    // sets the clock).  SPI 51 = GSI 83; PL330 PDMA0 request lines 45 / 46
+    // (peripherals 13 RX / 14 TX) on its channels 0 / 1.
+    //
+    Device (UAR0)
+    {
+      Name (_HID, "EXYN5011")
+      Name (_UID, 0)
+      Method (_STA) { Return (0xF) }
+      Name (_CRS, ResourceTemplate () {
+        Memory32Fixed (ReadWrite, 0x12C00000, 0x00000100)
+        Interrupt (ResourceConsumer, Level, ActiveHigh, Exclusive) { 83 }
+#if EXYNOS_PL330_DMA
+        FixedDMA (45, 0, Width8bit)                                                      // RX
+        FixedDMA (46, 1, Width8bit)                                                      // TX
+#endif
+      })
+    }
+
+    //
+    // Bluetooth (exynosbt, serial HCI bus driver): Broadcom BCM4350-family
+    // controller on UART0, 115200 8N1 with RTS/CTS until the driver raises
+    // the rate.  BT_EN GPG0(7) (pin 47), BT_WAKE GPX3(2) (pin 10), both
+    // active high; HOST_WAKE GPX2(1) (pin 17) only connected for its
+    // PullNone, as board-bluetooth-bcm4339.c sets it before power-up.
+    //
+    Device (BTH0)
+    {
+      Name (_HID, "EXYN5012")
+      Name (_UID, 0)
+      Method (_STA) { Return (0xF) }
+      Name (_CRS, ResourceTemplate () {
+        UartSerialBus (115200, DataBitsEight, StopBitsOne, 0xC0, LittleEndian, ParityTypeNone,
+                       FlowControlHardware, 0x100, 0x100, "\\_SB.UAR0", 0, ResourceConsumer, , )
+        GpioIo (Exclusive, PullNone, 0, 0, IoRestrictionOutputOnly, "\\_SB.GPIO") { 47 }   // BT_EN
+        GpioIo (Exclusive, PullNone, 0, 0, IoRestrictionOutputOnly, "\\_SB.GPIO") { 10 }   // BT_WAKE
+        GpioIo (Exclusive, PullNone, 0, 0, IoRestrictionInputOnly, "\\_SB.GPIO") { 17 }    // HOST_WAKE: no pull (the reset pull-down kept the controller from starting)
       })
     }
 
@@ -341,6 +396,26 @@ DefinitionBlock ("DSDT.aml", "DSDT", 2, "SAMSNG", "EXY5420 ", 1)
     }
 
     //
+    // Mali-T628 MP6 (exynosgpu): registers 0x11800000 + 0x5000; job, MMU,
+    // GPU interrupts SPI 219 / 74 / 117 (GSI 251 / 106 / 149, panfrost
+    // order); the PMIC for vdd_g3d (MAX77802 BUCK4).  The driver sets the
+    // clock (VPLL -> aclk_g3d) and switches the G3D power domain itself.
+    //
+    Device (GPU0)
+    {
+      Name (_HID, "EXYN5013")
+      Name (_UID, 0)
+      Method (_STA) { Return (0xF) }
+      Name (_CRS, ResourceTemplate () {
+        Memory32Fixed (ReadWrite, 0x11800000, 0x00005000)
+        Interrupt (ResourceConsumer, Level, ActiveHigh, Exclusive) { 251 }   // job
+        Interrupt (ResourceConsumer, Level, ActiveHigh, Exclusive) { 106 }   // MMU
+        Interrupt (ResourceConsumer, Level, ActiveHigh, Exclusive) { 149 }   // GPU
+        I2cSerialBus (0x09, ControllerInitiated, 400000, AddressingMode7Bit, "\\_SB.HSI3", 0, ResourceConsumer)
+      })
+    }
+
+    //
     // Internal display (exynosdisp, WDDM display-only): LSL122DL01 eDP panel
     // on FIMD1 0x14400000 + DP1 0x145B0000, LP8556 backlight on PWM0 and the
     // bit-banged I2C GPA2(4)/(5).  The driver maps its blocks itself (the
@@ -409,4 +484,88 @@ DefinitionBlock ("DSDT.aml", "DSDT", 2, "SAMSNG", "EXY5420 ", 1)
       }
     }
   }
+
+#if EXYNOS_THERMAL
+  //
+  // Thermal zones on the Exynos5420 TMU (started by TmuDxe): one-point trim,
+  // T = code - trim + 25 (°C), codes 31..146; trim = TRIMINFO[7:0], 55 if
+  // outside 16..76 or TRIMINFO[15:8] != 0 (Samsung exynos_thermal.c).  The
+  // 5420 trim ring: CPU2 uses block 3's TRIMINFO, CPU3 block 4's, the GPU
+  // block 2's.  Units: tenths of a kelvin.  Passive cooling acts through the
+  // processors' performance states (exynospep); 115 °C is the TMU's own
+  // hardware trip.
+  //
+  Scope (\_TZ)
+  {
+    OperationRegion (TMU0, SystemMemory, 0x10060000, 0x44)
+    Field (TMU0, DWordAcc, NoLock, Preserve) { TI0, 32, Offset (0x40), CT0, 32 }
+    OperationRegion (TMU1, SystemMemory, 0x10064000, 0x44)
+    Field (TMU1, DWordAcc, NoLock, Preserve) { TI1, 32, Offset (0x40), CT1, 32 }
+    OperationRegion (TMU2, SystemMemory, 0x10068000, 0x44)
+    Field (TMU2, DWordAcc, NoLock, Preserve) { TI2, 32, Offset (0x40), CT2, 32 }
+    OperationRegion (TMU3, SystemMemory, 0x1006C000, 0x44)
+    Field (TMU3, DWordAcc, NoLock, Preserve) { TI3, 32, Offset (0x40), CT3, 32 }
+    OperationRegion (TMU4, SystemMemory, 0x100A0000, 0x44)
+    Field (TMU4, DWordAcc, NoLock, Preserve) { TI4, 32, Offset (0x40), CT4, 32 }
+
+    // Arg0 TRIMINFO -> trim
+    Method (TRMV, 1, Serialized)
+    {
+      Local0 = (Arg0 & 0xFF)
+      If (((Local0 < 16) || (Local0 > 76)) || (((Arg0 >> 8) & 0xFF) != 0)) {
+        Local0 = 55
+      }
+      Return (Local0)
+    }
+
+    // Arg0 CURRENT_TEMP, Arg1 TRIMINFO -> tenths of a kelvin
+    Method (TEMP, 2, Serialized)
+    {
+      Local0 = (Arg0 & 0xFF)
+      If ((Local0 < 31) || (Local0 > 146)) {
+        Return (2982)                  // no reading: report 25 °C
+      }
+      Local0 += 25
+      Local1 = TRMV (Arg1)
+      If (Local0 < Local1) {
+        Return (2732)
+      }
+      Return (((Local0 - Local1) * 10) + 2732)
+    }
+
+    ThermalZone (TZ00)                 // A15 cluster: the hottest of CPU0..3
+    {
+      Method (_TMP, 0, Serialized)
+      {
+        Local0 = TEMP (CT0, TI0)
+        Local1 = TEMP (CT1, TI1)
+        If (Local1 > Local0) { Local0 = Local1 }
+        Local1 = TEMP (CT2, TI3)
+        If (Local1 > Local0) { Local0 = Local1 }
+        Local1 = TEMP (CT3, TI4)
+        If (Local1 > Local0) { Local0 = Local1 }
+        Return (Local0)
+      }
+      Name (_PSV, 3632)                // 90 °C (Samsung trigger level 1)
+      Name (_PSL, Package () { \_SB.CPU0, \_SB.CPU1, \_SB.CPU2, \_SB.CPU3 })
+      Name (_TC1, 2)
+      Name (_TC2, 3)
+      Name (_TSP, 10)                  // 1 s while passive
+      Name (_CRT, 3832)                // 110 °C (trigger level 2): orderly shutdown
+      Name (_TZP, 30)                  // poll every 3 s
+      Name (_STR, Unicode ("CPU (A15 cluster)"))
+    }
+
+    ThermalZone (TZ01)                 // GPU
+    {
+      Method (_TMP, 0, Serialized)
+      {
+        Return (TEMP (CT4, TI2))
+      }
+      Name (_CRT, 3832)
+      Name (_TZP, 30)
+      Name (_STR, Unicode ("GPU"))
+    }
+  }
+#endif
 }

@@ -1074,7 +1074,13 @@ PlatformBootManagerAfterConsole (
   //
   ChargeModeIfNeeded ();
 
-  if (TakeShellFlag ()) {
+  //
+  // TEMPORARY (display bring-up): boot straight to the Shell and its
+  // startup.nsh, no menu, so unattended test reboots end up in the test.
+  // Set to 0 to get the boot menu (and Windows) back.
+  //
+#define TEMP_DEFAULT_SHELL  0
+  if (TEMP_DEFAULT_SHELL || TakeShellFlag ()) {
     BootShell (FALSE);
     return;
   }

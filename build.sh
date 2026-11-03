@@ -100,6 +100,11 @@ if ! grep -q '^\*_CLANGDWARF_ARM_DEPS_FLAGS' "$TOOLS_DEF"; then
     echo "Added CLANGDWARF ARM DEPS_FLAGS to $TOOLS_DEF"
 fi
 
+# THERMAL=1: TmuDxe in the FD (build-thermal.sh also switches the DSDT zones).
+if [ "${THERMAL}" = 1 ]; then
+    DSCOPTS+=(-D EXYNOS_THERMAL=TRUE)
+fi
+
 # The ASL build does not track headers included from .asl files
 # (PlatformDma.h switches FixedDMA): always recompile the DSDT.
 touch "$PWD/AcpiTables/Dsdt/Dsdt.asl"

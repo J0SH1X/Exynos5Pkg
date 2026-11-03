@@ -126,6 +126,9 @@ APRIORI DXE {
   INF Exynos5420Pkg/Drivers/SensorDxe/SensorDxe.inf
   INF Exynos5420Pkg/Drivers/CpuFreqDxe/CpuFreqDxe.inf
   INF Exynos5420Pkg/Drivers/BatteryDxe/BatteryDxe.inf
+!if $(EXYNOS_THERMAL) == TRUE
+  INF Exynos5420Pkg/Drivers/Thermal/TmuDxe/TmuDxe.inf
+!endif
   INF Exynos5420Pkg/Drivers/GenericKeypadDeviceDxe/GenericKeypadDeviceDxe.inf
   INF Exynos5420Pkg/Drivers/KeypadDxe/KeypadDxe.inf
 

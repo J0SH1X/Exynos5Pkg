@@ -1,0 +1,36 @@
+#
+#  Exynos5420 thermal sensors (TMU): started at boot for the OS's ACPI
+#  thermal zones, hardware trip armed; temperatures logged once a minute.
+#
+#  SPDX-License-Identifier: BSD-2-Clause-Patent
+#
+
+[Defines]
+  INF_VERSION    = 0x00010005
+  BASE_NAME      = Exynos5420TmuDxe
+  FILE_GUID      = 3c1f7e21-6a4d-4b0c-9c33-2a441220c022
+  MODULE_TYPE    = DXE_DRIVER
+  VERSION_STRING = 1.0
+
+  ENTRY_POINT    = TmuDxeInitialize
+
+[Sources.common]
+  TmuDxe.c
+  ../TmuCore.h
+  ../TmuCore.c
+
+[Packages]
+  MdePkg/MdePkg.dec
+  ArmPkg/ArmPkg.dec
+  Exynos5420Pkg/Exynos5420Pkg.dec
+
+[LibraryClasses]
+  BaseLib
+  DebugLib
+  IoLib
+  TimerLib
+  UefiBootServicesTableLib
+  UefiDriverEntryPoint
+
+[Depex]
+  TRUE

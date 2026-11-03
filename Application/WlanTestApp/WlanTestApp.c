@@ -311,6 +311,7 @@ WlanTestMain (
   CHAR8                            Ver[128];
   UINT8                            Mac[6];
   CHAR8                            Mode[8];
+  BOOLEAN                          Keep;
   CHAR8                            Ssid[40];
   CHAR8                            Pass[72];
   BOOLEAN                          Join;
@@ -326,7 +327,14 @@ WlanTestMain (
   }
 
   Join    = FALSE;
+  Keep    = FALSE;
   Pass[0] = '\0';
+  // "keep": leave the chip powered with its firmware running (for tests of
+  // the combo chip's Bluetooth side next to a live Wi-Fi side).
+  if ((Image->LoadOptions != NULL) && GetArg (Image->LoadOptions, 0, Mode, sizeof (Mode)) &&
+      (AsciiStrCmp (Mode, "keep") == 0)) {
+    Keep = TRUE;
+  }
   if ((Image->LoadOptions != NULL) && GetArg (Image->LoadOptions, 0, Mode, sizeof (Mode)) &&
       (AsciiStrCmp (Mode, "join") == 0) && GetArg (Image->LoadOptions, 1, Ssid, sizeof (Ssid))) {
     Join = TRUE;
@@ -389,8 +397,11 @@ WlanTestMain (
   }
   BcmLogConsole (&mBcm);
 
-  DEBUG ((DEBUG_INFO, "Wlan: finished - %r (%u frames, %u errors); chip powered off\n", Status, mBcm.Frames, mBcm.Errors));
+  DEBUG ((DEBUG_INFO, "Wlan: finished - %r (%u frames, %u errors); chip %a\n", Status, mBcm.Frames, mBcm.Errors,
+          Keep ? "left running" : "powered off"));
   Print (L"WlanTest: %r (details in the debug log)\n", Status);
-  WlanPower (Gpio, FALSE);
+  if (!Keep) {
+    WlanPower (Gpio, FALSE);
+  }
   return Status;
 }

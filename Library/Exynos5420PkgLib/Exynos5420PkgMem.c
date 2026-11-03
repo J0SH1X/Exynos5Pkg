@@ -22,6 +22,7 @@
 #include <ExynosLogRing.h>
 #include <ExynosOsLog.h>
 #include <ExynosDmaPrograms.h>
+#include <ExynosGpuCarveout.h>
 
 // The total number of descriptors, including the final "end-of-table" descriptor.
 #define MAX_VIRTUAL_MEMORY_MAP_DESCRIPTORS 12
@@ -283,6 +284,20 @@ ArmPlatformGetVirtualMemoryMap (
   // PL330 DMA channel programs (ExynosDmaPrograms.h, halextpl330).
   //
   CarveReservedRange (PL330_PROGRAM_BASE, PL330_PROGRAM_SIZE);
+
+  //
+  // GPU / display carve-out (ExynosGpuCarveout.h): exynoswddm's memory
+  // segment; the header tells the driver the range is really reserved.
+  //
+  CarveReservedRange (GPU_CARVEOUT_BASE, GPU_CARVEOUT_SIZE);
+  {
+    GPU_CARVEOUT_HEADER  *Hdr = (GPU_CARVEOUT_HEADER *)(UINTN)GPU_CARVEOUT_BASE;
+
+    Hdr->Magic    = GPU_CARVEOUT_MAGIC;
+    Hdr->Base     = GPU_CARVEOUT_BASE;
+    Hdr->Size     = GPU_CARVEOUT_SIZE;
+    Hdr->Reserved = 0;
+  }
 
   //
   // The bootloader's r1/r2 and ATAG list (ExynosBootParams.h), kept for a

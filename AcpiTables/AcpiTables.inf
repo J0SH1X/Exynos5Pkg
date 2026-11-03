@@ -21,6 +21,7 @@
   Csrt.aslc
   Platform.h
   PlatformDma.h
+  PlatformThermal.h
 
 [Packages]
   ArmPkg/ArmPkg.dec

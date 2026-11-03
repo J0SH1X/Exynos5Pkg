@@ -1,0 +1,43 @@
+#
+#  v1awifi Bluetooth bring-up test (shell application): UART0, BT_EN / BT_WAKE,
+#  HCI_Reset in several configurations, then the patch download.
+#
+#  SPDX-License-Identifier: BSD-2-Clause-Patent
+#
+
+[Defines]
+  INF_VERSION    = 0x00010005
+  BASE_NAME      = BtTest
+  FILE_GUID      = 3c1f7e21-6a4d-4b0c-9c33-54201220c018
+  MODULE_TYPE    = UEFI_APPLICATION
+  VERSION_STRING = 1.0
+
+  ENTRY_POINT    = BtTestMain
+
+[Sources.common]
+  BtTestApp.c
+
+[Packages]
+  MdePkg/MdePkg.dec
+  ArmPkg/ArmPkg.dec
+  Exynos5420Pkg/Exynos5420Pkg.dec
+
+[LibraryClasses]
+  BaseLib
+  BaseMemoryLib
+  PrintLib
+  DebugLib
+  IoLib
+  MemoryAllocationLib
+  TimerLib
+  UefiApplicationEntryPoint
+  UefiBootServicesTableLib
+  UefiLib
+
+[Protocols]
+  gExynosGpioProtocolGuid
+  gEfiLoadedImageProtocolGuid
+  gEfiSimpleFileSystemProtocolGuid
+
+[Guids]
+  gEfiFileInfoGuid

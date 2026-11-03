@@ -11,6 +11,6 @@
 #define __EXYNOS_DMA_PROGRAMS_H__
 
 #define PL330_PROGRAM_BASE  0x9E080000      // right after the OS log ring
-#define PL330_PROGRAM_SIZE  0x00001000
+#define PL330_PROGRAM_SIZE  0x00002000      // ADMA0 at +0, PDMA0 at +0x1000
 
 #endif

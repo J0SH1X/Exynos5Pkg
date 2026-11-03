@@ -1,0 +1,43 @@
+#
+#  v1awifi Mali-T628 bring-up test (shell application) over the shared core
+#  (Drivers/Gpu): vdd_g3d, clock, power domain, reset, MMU, NULL and
+#  WRITE_VALUE jobs.
+#
+#  SPDX-License-Identifier: BSD-2-Clause-Patent
+#
+
+[Defines]
+  INF_VERSION    = 0x00010005
+  BASE_NAME      = GpuTest
+  FILE_GUID      = 3c1f7e21-6a4d-4b0c-9c33-54201220c019
+  MODULE_TYPE    = UEFI_APPLICATION
+  VERSION_STRING = 1.0
+
+  ENTRY_POINT    = GpuTestMain
+
+[Sources.common]
+  GpuTestApp.c
+  ../../Drivers/Gpu/MaliCore.h
+  ../../Drivers/Gpu/MaliCore.c
+
+[Packages]
+  MdePkg/MdePkg.dec
+  ArmPkg/ArmPkg.dec
+  Exynos5420Pkg/Exynos5420Pkg.dec
+
+[LibraryClasses]
+  BaseLib
+  BaseMemoryLib
+  CacheMaintenanceLib
+  DebugLib
+  IoLib
+  MemoryAllocationLib
+  TimerLib
+  UefiApplicationEntryPoint
+  UefiBootServicesTableLib
+  UefiLib
+
+[Protocols]
+  gExynosGpioProtocolGuid
+  gExynosI2cProtocolGuid
+  gEfiLoadedImageProtocolGuid

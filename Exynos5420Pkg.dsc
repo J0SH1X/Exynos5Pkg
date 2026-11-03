@@ -31,6 +31,9 @@
   DEFINE USE_UART_FOR_SERIAL_OUTPUT = 0
   DEFINE USE_SCREEN_FOR_SERIAL_OUTPUT = 1
 
+  # TmuDxe (thermal sensors for the DSDT's thermal zones): build-thermal.sh.
+  DEFINE EXYNOS_THERMAL = FALSE
+
 !include Exynos5420Pkg/CommonDsc.dsc.inc
 
 ################################################################################
@@ -82,6 +85,9 @@
   Exynos5420Pkg/Drivers/SensorDxe/SensorDxe.inf
   Exynos5420Pkg/Drivers/CpuFreqDxe/CpuFreqDxe.inf
   Exynos5420Pkg/Drivers/BatteryDxe/BatteryDxe.inf
+!if $(EXYNOS_THERMAL) == TRUE
+  Exynos5420Pkg/Drivers/Thermal/TmuDxe/TmuDxe.inf
+!endif
   Exynos5420Pkg/Drivers/MpParkDxe/MpParkDxe.inf
   MdeModulePkg/Universal/SmbiosDxe/SmbiosDxe.inf
   Exynos5420Pkg/Drivers/SmbiosPlatformDxe/SmbiosPlatformDxe.inf
@@ -100,6 +106,10 @@
   Exynos5420Pkg/Application/TouchTestApp/TouchTestApp.inf
   Exynos5420Pkg/Application/BatteryTestApp/BatteryTestApp.inf
   Exynos5420Pkg/Application/WlanTestApp/WlanTestApp.inf
+  Exynos5420Pkg/Application/BtTestApp/BtTestApp.inf
+  Exynos5420Pkg/Application/GpuTestApp/GpuTestApp.inf
+  Exynos5420Pkg/Application/ThermalTestApp/ThermalTestApp.inf
+  Exynos5420Pkg/Application/CameraTestApp/CameraTestApp.inf
   Exynos5420Pkg/Application/AudioTestApp/AudioTestApp.inf
   Exynos5420Pkg/Application/SensorTestApp/SensorTestApp.inf
   Exynos5420Pkg/Application/DisplayTestApp/DisplayTestApp.inf

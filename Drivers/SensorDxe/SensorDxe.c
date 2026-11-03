@@ -27,6 +27,8 @@
 #define PMIC_BUS          7
 #define PMIC_ADDR         0x09
 #define PMIC_LDO34_CTRL1  0x81
+#define PMIC_32KHZ        0xB5
+#define PMIC_32KHZ_AP_CP  0x03
 #define PMIC_LDO_ON_2V8   (0xC0 | ((2800000 - 800000) / 50000))   // P-channel LDO: 800 mV + 50 mV steps
 
 #define GPA1_BASE         0x14010020       // I2C3 SDA = GPA1(2), SCL = GPA1(3)
@@ -70,6 +72,22 @@ SensorDxeInitialize (
     }
   } else {
     DEBUG ((DEBUG_ERROR, "SensorDxe: MAX77802 not reachable, sensor supply unchecked\n"));
+  }
+
+  //
+  // The PMIC's 32 kHz outputs (MAX77802 32KHZ register 0xB5: bit 0 AP,
+  // bit 1 CP): CP is the Broadcom Bluetooth controller's LPO clock
+  // (mainline exynos5420-galaxy-tab-pro-common.dtsi), which it needs to
+  // run.  Here, with the other PMIC board settings, until a PMIC driver
+  // exists.
+  //
+  if (!EFI_ERROR (Status) && (I2c->Read (I2c, PMIC_BUS, PMIC_ADDR, PMIC_32KHZ, &Ctrl, 1) == 1)) {
+    if ((Ctrl & PMIC_32KHZ_AP_CP) != PMIC_32KHZ_AP_CP) {
+      Buf[0] = PMIC_32KHZ;
+      Buf[1] = Ctrl | PMIC_32KHZ_AP_CP;
+      I2c->Write (I2c, PMIC_BUS, PMIC_ADDR, Buf, 2);
+    }
+    DEBUG ((DEBUG_INFO, "SensorDxe: PMIC 32 kHz outputs were 0x%02x, AP + CP on\n", Ctrl));
   }
 
   //
