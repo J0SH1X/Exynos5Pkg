@@ -30,6 +30,7 @@
 #define PMIC_LDO_ON_2V8   (0xC0 | ((2800000 - 800000) / 50000))   // P-channel LDO: 800 mV + 50 mV steps
 
 #define GPA1_BASE         0x14010020       // I2C3 SDA = GPA1(2), SCL = GPA1(3)
+#define GPB2_BASE         0x140100A0       // HS-I2C3 (bus 7, PMIC) SDA = GPB2(2), SCL = GPB2(3)
 #define GPG2_BASE         0x140000C0       // AK8963C reset = GPG2(0), active low
 #define GPX0_BASE         0x13400C00       // hall = GPX0(1)
 #define GPIO_CON          0x0
@@ -51,6 +52,13 @@ SensorDxeInitialize (
   //
   // Supply: the bootloader leaves LDO34 on; switch it on if not.
   //
+  // PMIC bus pins first (function 3, pull-up, as CpuFreqDxe sets them):
+  // a transfer on unmuxed pins left HS-I2C3 unusable, CpuFreqDxe then
+  // could not reach the PMIC and the cores stayed at 800 MHz.
+  //
+  MmioAndThenOr32 (GPB2_BASE + GPIO_CON, ~(0xFFu << 8), (0x3u << 8) | (0x3u << 12));
+  MmioAndThenOr32 (GPB2_BASE + GPIO_PUD, ~(0xFu << 4), (0x3u << 4) | (0x3u << 6));
+
   Status = gBS->LocateProtocol (&gExynosI2cProtocolGuid, NULL, (VOID **)&I2c);
   if (!EFI_ERROR (Status) && (I2c->Read (I2c, PMIC_BUS, PMIC_ADDR, PMIC_LDO34_CTRL1, &Ctrl, 1) == 1)) {
     if (Ctrl != PMIC_LDO_ON_2V8) {

@@ -84,6 +84,21 @@ DefinitionBlock ("DSDT.aml", "DSDT", 2, "SAMSNG", "EXY5420 ", 1)
       })
     }
 
+    //
+    // hs-i2c3 (UEFI bus 7): MAX77802 PMIC at 0x09.  Windows uses it for the
+    // touch key backlight (LDO23, TSC0's second I2C resource).  Pins GPB2(2/3)
+    // are muxed by UEFI (SensorDxe / CpuFreqDxe).
+    //
+    Device (HSI3)
+    {
+      Name (_HID, "EXYN5004")
+      Name (_UID, 3)
+      Method (_STA) { Return (0xF) }
+      Name (_CRS, ResourceTemplate () {
+        Memory32Fixed (ReadWrite, 0x12CD0000, 0x00000100)
+      })
+    }
+
     Device (HSI4)
     {
       Name (_HID, "EXYN5004")
@@ -249,6 +264,7 @@ DefinitionBlock ("DSDT.aml", "DSDT", 2, "SAMSNG", "EXY5420 ", 1)
       Method (_STA) { Return (0xF) }
       Name (_CRS, ResourceTemplate () {
         I2cSerialBus (0x4A, ControllerInitiated, 100000, AddressingMode7Bit, "\\_SB.I2C0", 0, ResourceConsumer)
+        I2cSerialBus (0x09, ControllerInitiated, 400000, AddressingMode7Bit, "\\_SB.HSI3", 0, ResourceConsumer)   // PMIC: key backlight LDO23
         GpioInt (Level, ActiveLow, Exclusive, PullNone, 0, "\\_SB.GPIO") { 0 }
       })
     }
@@ -336,6 +352,11 @@ DefinitionBlock ("DSDT.aml", "DSDT", 2, "SAMSNG", "EXY5420 ", 1)
       Name (_HID, "EXYN5010")
       Name (_UID, 0)
       Method (_STA) { Return (0xF) }
+      // FIMD1 frame interrupt for exynosdisp2: combiner group 18 (SPI 18 =
+      // GSI 50), input 5 enabled by the driver.  exynosdisp (v1) leaves it off.
+      Name (_CRS, ResourceTemplate () {
+        Interrupt (ResourceConsumer, Level, ActiveHigh, Exclusive) { 50 }
+      })
     }
 
     //

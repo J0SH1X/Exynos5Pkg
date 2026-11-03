@@ -1,12 +1,13 @@
 /** @file
   Raise the Cortex-A15 cluster clock from the bootloader's 800 MHz to
-  CPU_TARGET_MHZ (1.0 GHz for now; 1.8 GHz is tested too) early in DXE,
+  CPU_TARGET_MHZ (1.2 GHz; 1.0 and 1.8 GHz are tested too) early in DXE,
   for UEFI and everything booted from it (the OS keeps the setting until
   a cpufreq driver of its own takes over).
 
   Values from the v1awifi kernel (exynos5420-cpufreq.c, asv-exynos5420.h):
     - 1800 MHz: APLL M/P/S 225/3/0, CLK_DIV_CPU0 { CPUD 4, ATB 7,
-      PCLK_DBG 7, APLL 3, ARM2 0 }; 1000 MHz: 250/3/1, { 2, 6, 6, 3, 0 };
+      PCLK_DBG 7, APLL 3, ARM2 0 }; 1200 MHz: 200/2/1, { 2, 7, 7, 3, 0 };
+      1000 MHz: 250/3/1, { 2, 6, 6, 3, 0 };
       CLK_DIV_CPU1 { COPY 7, HPM 7 } for both.
     - VDD_ARM: the slowest ASV group's (group 0) voltage for the level; we
       do not read the chip's ASV group, so take that plus 25 mV of margin.
@@ -76,12 +77,16 @@ STATIC CONST CHAR8   *mMsPllName[4] = { "CPLL", "DPLL", "MPLL", "SPLL" };
 #define CPU_DIV0(Cpud, Atb, PclkDbg, Apll, Arm2)  \
   (((Cpud) << 4) | ((Atb) << 16) | ((PclkDbg) << 20) | ((Apll) << 24) | ((Arm2) << 28))
 
-#define CPU_TARGET_MHZ     1000u
+#define CPU_TARGET_MHZ     1200u
 
 #if CPU_TARGET_MHZ == 1800
 #define TARGET_APLL_PMS    ((225u << 16) | (3u << 8) | 0u)
 #define TARGET_DIV_CPU0    CPU_DIV0 (4u, 7u, 7u, 3u, 0u)
 #define TARGET_VDD_ARM_UV  1250000u      // group 0: 1225000
+#elif CPU_TARGET_MHZ == 1200
+#define TARGET_APLL_PMS    ((200u << 16) | (2u << 8) | 1u)
+#define TARGET_DIV_CPU0    CPU_DIV0 (2u, 7u, 7u, 3u, 0u)
+#define TARGET_VDD_ARM_UV  1062500u      // group 0: 1037500
 #elif CPU_TARGET_MHZ == 1000
 #define TARGET_APLL_PMS    ((250u << 16) | (3u << 8) | 1u)
 #define TARGET_DIV_CPU0    CPU_DIV0 (2u, 6u, 6u, 3u, 0u)
