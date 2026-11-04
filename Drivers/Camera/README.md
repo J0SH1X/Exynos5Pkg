@@ -83,6 +83,9 @@ Status (2026-11-04, unattended night session):
 - Power down: HIC_POWER_DOWN first (firmware enters WFI), then ISP_ARM OPTION
   0x10000 -> 0, sys-pwr regs 0, domain off. Without it the domain stays on.
 
+Firmware blobs (A5 firmware, setfiles): ExynosWinDrivers/firmware/ (stock LRX22G.P900XXS0BPL2, see its README);
+the UEFI test loads them from the volume root (push with ~/exynos5/camera-test/run.sh).
+
 Sources:
 - Samsung 3.4 tree `android_kernel_samsung_exynos5420` with `lineageos_v1awifi_defconfig`;
 - stock `/system/vendor/firmware` from `~/Downloads/system.img`.
