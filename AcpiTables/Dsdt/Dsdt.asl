@@ -98,9 +98,9 @@ DefinitionBlock ("DSDT.aml", "DSDT", 2, "SAMSNG", "EXY5420 ", 1)
     }
 
     //
-    // hs-i2c3 (UEFI bus 7): MAX77802 PMIC at 0x09.  Windows uses it for the
-    // touch key backlight (LDO23, TSC0's second I2C resource).  Pins GPB2(2/3)
-    // are muxed by UEFI (SensorDxe / CpuFreqDxe).
+    // hs-i2c3 (UEFI bus 7): MAX77802 PMIC at 0x09, owned by the PMIC device
+    // (exynospmic) below.  Pins GPB2(2/3) are muxed by UEFI (SensorDxe /
+    // CpuFreqDxe).
     //
     Device (HSI3)
     {
@@ -319,7 +319,6 @@ DefinitionBlock ("DSDT.aml", "DSDT", 2, "SAMSNG", "EXY5420 ", 1)
       Method (_STA) { Return (0xF) }
       Name (_CRS, ResourceTemplate () {
         I2cSerialBus (0x4A, ControllerInitiated, 100000, AddressingMode7Bit, "\\_SB.I2C0", 0, ResourceConsumer)
-        I2cSerialBus (0x09, ControllerInitiated, 400000, AddressingMode7Bit, "\\_SB.HSI3", 0, ResourceConsumer)   // PMIC: key backlight LDO23
         GpioInt (Level, ActiveLow, Exclusive, PullNone, 0, "\\_SB.GPIO") { 0 }
       })
     }
@@ -398,7 +397,7 @@ DefinitionBlock ("DSDT.aml", "DSDT", 2, "SAMSNG", "EXY5420 ", 1)
     //
     // Mali-T628 MP6 (exynosgpu): registers 0x11800000 + 0x5000; job, MMU,
     // GPU interrupts SPI 219 / 74 / 117 (GSI 251 / 106 / 149, panfrost
-    // order); the PMIC for vdd_g3d (MAX77802 BUCK4).  The driver sets the
+    // order); vdd_g3d (MAX77802 BUCK4) through exynospmic (PMIC device).  The driver sets the
     // clock (VPLL -> aclk_g3d) and switches the G3D power domain itself.
     //
     Device (GPU0)
@@ -411,7 +410,40 @@ DefinitionBlock ("DSDT.aml", "DSDT", 2, "SAMSNG", "EXY5420 ", 1)
         Interrupt (ResourceConsumer, Level, ActiveHigh, Exclusive) { 251 }   // job
         Interrupt (ResourceConsumer, Level, ActiveHigh, Exclusive) { 106 }   // MMU
         Interrupt (ResourceConsumer, Level, ActiveHigh, Exclusive) { 149 }   // GPU
+      })
+    }
+
+    //
+    // MAX77802 PMIC (exynospmic): the only owner of its I2C connection (the
+    // connection is exclusive); key backlight LDO23 (mxt1664s), vdd_g3d BUCK4
+    // (exynosgpu) and the camera rails LDO18/19/24 (exynoscam) go through
+    // its interface (ExynosWinDrivers/common/ExPmicIf.h).
+    //
+    Device (PMIC)
+    {
+      Name (_HID, "EXYN5016")
+      Name (_UID, 0)
+      Method (_STA) { Return (0xF) }
+      Name (_CRS, ResourceTemplate () {
         I2cSerialBus (0x09, ControllerInitiated, 400000, AddressingMode7Bit, "\\_SB.HSI3", 0, ResourceConsumer)
+      })
+    }
+
+    //
+    // Camera ISP (exynoscam): FIMC-IS 0x13000000 with its Cortex-A5 (MCUCTL at
+    // +0x180000).  The A5's mailbox interrupt goes through combiner group 19
+    // input 1 (ARMISP) = SPI 19 = GSI 51, verified by CameraTest.efi; the
+    // combiner group is shared, the driver enables only its input.  PMU, CMU
+    // and SYSREG are shared windows the driver maps itself.
+    //
+    Device (CAM0)
+    {
+      Name (_HID, "EXYN5015")
+      Name (_UID, 0)
+      Method (_STA) { Return (0xF) }
+      Name (_CRS, ResourceTemplate () {
+        Memory32Fixed (ReadWrite, 0x13000000, 0x001A0000)
+        Interrupt (ResourceConsumer, Level, ActiveHigh, Shared) { 51 }
       })
     }
 

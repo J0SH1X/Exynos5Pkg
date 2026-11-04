@@ -56,11 +56,16 @@
 #define MCUCTL                   0x180000
 #define MCUCTLR                  (MCUCTL + 0x00)
 #define BBOAR                    (MCUCTL + 0x04)
+#define INTGR0                   (MCUCTL + 0x08)
+#define INTMSR0                  (MCUCTL + 0x18)
 #define INTCR1                   (MCUCTL + 0x20)
 #define INTMR1                   (MCUCTL + 0x24)
 #define INTMSR1                  (MCUCTL + 0x2C)
 #define ISSR0                    (MCUCTL + 0x80)
 #define ISSR6                    (ISSR0 + 6 * 4)
+#define COM_HICMD                (ISSR0 + 0x00)
+#define COM_HIC_SENSORID         (ISSR0 + 0x04)
+#define COM_HIC_PARAM1           (ISSR0 + 0x08)
 #define COM_IHCMD_IFLAG          (ISSR0 + 0x24)
 #define COM_IHCMD                (ISSR0 + 0x28)
 #define COM_IHC_SENSORID         (ISSR0 + 0x2C)
@@ -302,12 +307,43 @@ FimcIsWaitMessage (
   return 0;
 }
 
+INTN
+FimcIsSend (
+  IN FIMC_IS  *Is,
+  IN UINT32   Command,
+  IN UINT32   SensorId,
+  IN UINT32   Param1,
+  IN UINT32   Param2,
+  IN UINT32   Param3,
+  IN UINT32   Param4
+  )
+{
+  // waiting_is_ready(): TRY_RECV_AWARE_COUNT x 100 us
+  if (!WaitBits (Is->Is + INTMSR0, 1, 0, 100000)) {
+    return -1;
+  }
+  MmioWrite32 (Is->Is + COM_HICMD, Command);
+  MmioWrite32 (Is->Is + COM_HIC_SENSORID, SensorId);
+  MmioWrite32 (Is->Is + COM_HIC_PARAM1, Param1);
+  MmioWrite32 (Is->Is + COM_HIC_PARAM1 + 4, Param2);
+  MmioWrite32 (Is->Is + COM_HIC_PARAM1 + 8, Param3);
+  MmioWrite32 (Is->Is + COM_HIC_PARAM1 + 12, Param4);
+  MmioWrite32 (Is->Is + INTGR0, 1);
+  return 0;
+}
+
 VOID
 FimcIsPowerDown (
   IN OUT FIMC_IS  *Is
   )
 {
   if (Is->A5On) {
+    //
+    // fimc_is_ischain_power(0): STOP_STARTED while the firmware runs (it
+    // should be in WFI after HIC_POWER_DOWN), then everything off.
+    //
+    MmioWrite32 (Is->Pmu + PMU_ISP_ARM_OPTION, ARM_OPTION_STOP_STARTED);
+    MicroSecondDelay (1000);
     MmioWrite32 (Is->Pmu + PMU_ISP_ARM_OPTION, 0);
     MmioWrite32 (Is->Pmu + PMU_ISP_ARM_CONFIG, 0);
     WaitBits (Is->Pmu + PMU_ISP_ARM_STATUS, 1, 0, 1000);

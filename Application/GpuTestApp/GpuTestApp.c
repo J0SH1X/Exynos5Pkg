@@ -32,6 +32,7 @@
 
 #include "../../Drivers/Gpu/MaliCore.h"
 #include "../../Drivers/Gpu/MaliShaderStream.h"
+#include "../../Drivers/Gpu/MaliVertexTest.h"
 
 #define PMIC_BUS      7
 #define PMIC_ADDR     0x09
@@ -330,6 +331,76 @@ GpuTestMain (
             *(volatile UINT32 *)(UINTN)(GOP_FB + 10 * GOP_STRIDE + 1290 * 4),
             *(volatile UINT32 *)(UINTN)(GOP_FB + 250 * GOP_STRIDE + 2550 * 4)));
     gBS->FreePages (SsPa, EFI_SIZE_TO_PAGES (MALI_SS_BUF_SIZE));
+  }
+
+  // 7. vertex job test: DWM's Mesa 26 vertex shader + descriptors, one variant per field under test (MaliVertexTest.h).
+  //    Per variant: the 4 positions (varying 0, Snap 4) and the attribute-1 copy (varying 1); a bar on screen per
+  //    variant: green = positions distinct and varying 1 exact, yellow = written but all four identical, red = not written.
+  {
+    EFI_PHYSICAL_ADDRESS  VtPa = 0xFFFFFFFF;
+    UINT8                 *Vt;
+    UINTN                 V;
+
+    if (EFI_ERROR (gBS->AllocatePages (AllocateMaxAddress, EfiBootServicesData, EFI_SIZE_TO_PAGES (MALI_VT_SIZE), &VtPa)) ||
+        (MaliPtMap (&Pool, MALI_VT_BASE, VtPa, ALIGN_VALUE (MALI_VT_SIZE, EFI_PAGE_SIZE)) != 0)) {
+      DEBUG ((DEBUG_ERROR, "GpuTest: vertex test: no memory / mapping\n"));
+    } else {
+      Vt = (UINT8 *)(UINTN)VtPa;
+      CopyMem (Vt, mMaliVertexTest, sizeof (mMaliVertexTest));
+      WriteBackDataCacheRange (Vt, MALI_VT_SIZE);
+      MaliAsFlush (&Mali, 0, MALI_VT_BASE, ALIGN_VALUE (MALI_VT_SIZE, EFI_PAGE_SIZE));
+      for (V = 0; V < MALI_VT_VARIANTS; V++) {
+        UINT32   Off = MALI_VT_VARIANT (V);
+        UINT32   *Pos = (UINT32 *)(Vt + Off + MALI_VT_POS);
+        UINT32   *Va1 = (UINT32 *)(Vt + Off + MALI_VT_VARY1);
+        INTN     R;
+        UINTN    I;
+        BOOLEAN  Written = TRUE;
+        BOOLEAN  Distinct = TRUE;
+        BOOLEAN  Vary1 = TRUE;
+        UINT32   Colour;
+        UINTN    X, Y;
+
+        R = MaliJobStart (&Mali, MALI_SLOT_OTHER, 0, MALI_VT_BASE + Off);
+        R = (R == 0) ? MaliJobWait (&Mali, MALI_SLOT_OTHER, 1000) : -1;
+        InvalidateDataCacheRange (Vt, MALI_VT_SIZE);
+        if (R != 0) {
+          MaliLogFault (&Mali, MALI_SLOT_OTHER, 0);
+        }
+        for (I = 0; I < 16; I++) {
+          if (Pos[I] == 0xDEADBEEF) {
+            Written = FALSE;
+          }
+        }
+        for (I = 1; I < 4; I++) {
+          if ((Pos[I * 4] == Pos[0]) && (Pos[I * 4 + 1] == Pos[1])) {
+            Distinct = FALSE;
+          }
+        }
+        for (I = 0; I < 16; I++) {
+          if (Va1[I] != mMaliVtExpect[I / 4][4 + I % 4]) {
+            Vary1 = FALSE;
+          }
+        }
+        DEBUG ((DEBUG_INFO, "GpuTest: vertex %u %a: job %a, positions %a%a, varying 1 %a\n", (UINT32)V, mMaliVtNames[V],
+                (R == 0) ? "done" : (R < 0) ? "TIMEOUT" : "FAULT", Written ? "written" : "NOT written",
+                !Written ? "" : Distinct ? ", distinct" : ", ALL IDENTICAL", Vary1 ? "exact" : "wrong"));
+        for (I = 0; I < 4; I++) {
+          DEBUG ((DEBUG_INFO, "GpuTest:   v%u pos %08x %08x %08x %08x (want %08x %08x) vary1 %08x %08x %08x %08x\n",
+                  (UINT32)I, Pos[I * 4], Pos[I * 4 + 1], Pos[I * 4 + 2], Pos[I * 4 + 3], mMaliVtExpect[I][0],
+                  mMaliVtExpect[I][1], Va1[I * 4], Va1[I * 4 + 1], Va1[I * 4 + 2], Va1[I * 4 + 3]));
+        }
+        Print (L"vertex %u %a: %a\n", (UINT32)V, mMaliVtNames[V],
+               !Written ? "NOT WRITTEN" : !Distinct ? "IDENTICAL" : Vary1 ? "OK" : "positions ok, varying 1 wrong");
+        Colour = !Written ? 0xFFFF0000 : !Distinct ? 0xFFFFFF00 : 0xFF00FF00;
+        for (Y = 700 + V * 100; Y < 760 + V * 100; Y++) {
+          for (X = 200; X < 2360; X++) {
+            *(volatile UINT32 *)(UINTN)(GOP_FB + Y * GOP_STRIDE + X * 4) = Colour;
+          }
+        }
+      }
+      gBS->FreePages (VtPa, EFI_SIZE_TO_PAGES (MALI_VT_SIZE));
+    }
   }
 
   MaliAsDisable (&Mali, 0);

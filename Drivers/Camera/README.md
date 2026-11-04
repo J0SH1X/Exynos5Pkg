@@ -1,8 +1,87 @@
 # Camera on v1awifi (SM-P900): research and plan
 
-Status (2026-11-03): **prepared, nothing has run on the device.**
-Shared core `FimcIsCore.{c,h}` and the UEFI test `Application/CameraTestApp`
-(staged in `~/exynos5/camera-test`) build. There is no Windows driver yet.
+Status (2026-11-04, unattended night session):
+- **Step 1 (A5 alive) WORKS** in UEFI: firmware boots, first mailbox message
+  `IHC_GET_SENSOR_NUMBER` param1 0x82; secure config via SMC verified (0xFC).
+- **Step 2 (rear sensor open + setfile) WORKS** in UEFI (`CameraTest.efi open`):
+  module powered (CamBoard.c), `HIC_OPEN_SENSOR` IMX134 DONE (margin 15x4,
+  shared[499] magic), AK7345 actuator initialised, setfile_imx134.bin loaded
+  (5 x "SETFILE V3"), stream off / process stop DONE, `HIC_POWER_DOWN` -> A5 WFI,
+  domain fully off.
+- **Windows: `ExynosWinDrivers/exynoscam`** (EXYN5015, DSDT CAM0) builds:
+  milestone-1 driver (power, firmware from System32\drivers, SMC secure config,
+  ISR on GSI 51). **Not installed/tested yet** (needs TWRP + dism by the user).
+- **Step 3a (raw frame) WORKS** (2026-11-04 14:10, `CameraTest.efi raw`):
+  CamCapture.c arms D-PHY 0 + CSIS0 (4 lanes, RAW10, settle 15) + FIMC-Lite A
+  (DMA, one slot, OTF off), then `HIC_STREAM_ON` -> firmware "IMX134_StreamOn
+  SUCCESS", FIMC-Lite frame start/end, full 3280x2458 RAW10 frame (u16 per
+  pixel, black ~64) in memory, saved to fs0 `\frame.raw`. Pull with
+  `usbdbg.py pull '\frame.raw' out --vol 0` (~55 s), convert with
+  `~/exynos5/camera-test/raw2png.py` (Bayer most likely RGGB; GRBG/GBRG come out grey).
+  First image: ceiling + LED light bar, unfocused (AF not driven), ~/exynos5/camera-test/frames/.
+  Firmware complains "[CSIS_ISRHandler] Fimc-lite stopped already" after we stop
+  FIMC-Lite (it tracks FLITE itself; harmless).
+- **Windows milestone 2 built, untested** (ExynosWinDrivers 1.0.0.123):
+  `exynoscam` runs the UEFI sequence in a worker thread (shared FimcIsCore.c,
+  FimcIsHost.c, CamBoard.c, CamCapture.c) and writes C:\malikm\camera.raw;
+  sensor rails via the new **`exynospmic`** (EXYN5016, sole owner of the PMIC
+  I2C, interface common/ExPmicIf.h). mxt1664s / exynosgpu use that interface
+  when their DSDT PMIC connection is gone. The DSDT in the current build moves
+  the PMIC connection to the PMIC device: old exynosgpu + new DSDT = GPU fails,
+  so install exynospmic + exynosgpu + mxt1664s + exynoscam together with it.
+- **Front camera (S5K6B2) works in UEFI** (2026-11-04, `CameraTest.efi raw front topmux`):
+  CamFrontPowerOn (GPY7(0) AVDD, LDO19 1.8 V, reset GPE0(4), ID GPY7(2) low, MCLK sclk_isp_sensor2 /
+  GPH0(7) func 2, ISP I2C2 = GPF0(4/5) func 2), module 9 (S5K6B2) with ext I2CChannel 2 (all else
+  zero), setfile_6b2.bin (same firmware as the rear), CSIS1 0x13C30000 + FIMC-Lite B 0x13C10000 +
+  D-PHY 1, 1936x1090 RAW10, settle 16 -> \front.raw, a sharp ceiling image. **Key fix: maximum
+  drive strength (GPFx DRV +0xC = 3 per pin) on the SDA / SCL pins** (the kernel does it); without
+  it the A5 logs `I2C_WaitForBusReady [ch 2] timeout` and the open fails. Now default for all
+  ISP I2C pins (rear too). FIMC-Lite B skips CIGENERAL.
+- **Exposure control (2026-11-04):** the A5 never sends the sensor exposure/gain without HIC_SHOT
+  requests, so streaming frames are very dark (default 302 lines / 1x on the rear). The host sets
+  them itself over the sensor's I2C: CamSensorI2c.c (bit-bang on the ISP I2C pins, taken from the
+  ISP per transfer; GPF0(0/1) rear sensor at 7-bit 0x1A, GPF0(4/5) front S5K6B2 at 0x35, model id
+  0x6B20) + CamAe.c (software AE: exposure lines 0x0202 up to frame_length-6, analog gain 0x0204
+  (IMX: code = 256 - 256/gain, max 224; S5K6B2: 0x20 = 1x), digital gain 8.8 at 0x020E..0x0214,
+  grouped hold 0x0104). Test: `CameraTest.efi raw [front] topmux ae` (converges in ~9 steps even in
+  a dark room); `i2c` / `expo=N again=N dgain=N` probe and set by hand. Rear: 3280x2458 frame_length
+  2609 line_length 3600; front: 1936x1090 frame_length 1125 line_length 2192.
+- **Windows rear camera works** (exynoscam 1.0.0.137): verified by camtest.exe, mftest.exe, mfpreview.exe
+  (desktop capture-engine preview) and a photo from the Store Camera app. Store-app live preview is black
+  (no GPU driver, WDDM removed on purpose). Needed: TopMux on, I2C drive strength, KS_FRAME_INFO + DataUsed,
+  timestamps in system time, host AE.
+- (history) Windows camera app (AVStream exynoscam): frames delivered but the app shows black while the raw
+  frames are real (dim scene); diagnosing (timestamps / format). The raw buffer can be dumped from
+  the running tablet with `usbdbg.py dump <PA> <len>`.
+- Open: module calibration (F-ROM over ISP SPI0) not read -> firmware logs
+  "FROM HEADER MAP VERSION check: FAIL" (harmless so far). Streaming not started.
+
+### Hard-won facts (2026-11-04)
+- Secure monitor convention: after `smc`, r0 stays -101 (SMC_CMD_REG) and the
+  **status is in r1** (0 = done), read value in r2 (`exynos_smc_readsfr`).
+  Treating r0 != 0 as failure was the first test's false "secure config failed".
+- Interrupt: MCUCTL INTR_GENERAL -> combiner group 19 input 1 (ARMISP) ->
+  **GIC INTID 51 = SPI 19 = GSI 51**. INTMR1 = 0x340 set by the firmware.
+  Sample the GIC *before* acknowledging (INTCR1) or nothing is pending.
+- Host -> A5: wait INTMSR0 bit 0 clear, write hicmd/hic_sensorid/param1..4
+  (ISSR0 +0x00..+0x14), INTGR0 = 1. Replies come as general messages
+  ISR_DONE (0x2000) / ISR_NDONE with param1 = the command.
+- Answer `IHC_GET_SENSOR_NUMBER` with ISR_DONE, param1 0x1000, param2 3 (enum).
+- Region for instance 0 at A5 + 0x13FB000; `shared[]` at +0x2D34 (struct
+  is_region offsets compiled from the kernel header for ARM); A5 address of
+  shared[] = BBOAR + 0x13FB000 + 0x2D34 goes in HIC_OPEN_SENSOR param2.
+- Firmware text log: A5 + 0x1340000 (0x7D000 ring), write offset (absolute,
+  from A5 base) at A5 + 0x13BD000. CameraTest prints it as `fw|` lines.
+- Firmware memory map (from its log): cache 0..0x1200000, heap 0x290000,
+  setfile 0x1200000 (+0x140000), debug 0x1340000, DCTRL 0x13BD000, share 0x13C0000.
+- IMX134 module: actuator is **AK7345 (7)** (kernel overrides WV560 for IMX134;
+  WV560 gave "Sensor I2C doesn't work. I2C ch(1)"). Flash MAX77693 GPIO 0/1.
+- MCLK sclk_isp_sensor0: CMU TOP SCLK_SRC_ISP 0x10020270 [30:28] = 5 (IPLL),
+  SCLK_DIV_ISP 0x10020580 [15:8] = 23 (18 MHz, stock V1A), gate 0x10020870 bit 4.
+  GPIO banks: GPE0/GPF0/GPF1 = 0x14000000 + 0/0x40/0x60, GPH0 = 0x14010100.
+  LDO24 1.05 V (kernel apply_uV min), LDO18 1.8 V; bootloader leaves them 0x28 / 0x14 (off).
+- Power down: HIC_POWER_DOWN first (firmware enters WFI), then ISP_ARM OPTION
+  0x10000 -> 0, sys-pwr regs 0, domain off. Without it the domain stays on.
 
 Sources:
 - Samsung 3.4 tree `android_kernel_samsung_exynos5420` with `lineageos_v1awifi_defconfig`;

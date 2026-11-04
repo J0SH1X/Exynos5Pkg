@@ -19,6 +19,16 @@
   CameraTestApp.c
   ../../Drivers/Camera/FimcIsCore.h
   ../../Drivers/Camera/FimcIsCore.c
+  ../../Drivers/Camera/FimcIsHost.h
+  ../../Drivers/Camera/FimcIsHost.c
+  ../../Drivers/Camera/CamBoard.h
+  ../../Drivers/Camera/CamBoard.c
+  ../../Drivers/Camera/CamCapture.h
+  ../../Drivers/Camera/CamCapture.c
+  ../../Drivers/Camera/CamSensorI2c.h
+  ../../Drivers/Camera/CamSensorI2c.c
+  ../../Drivers/Camera/CamAe.h
+  ../../Drivers/Camera/CamAe.c
 
 [Packages]
   MdePkg/MdePkg.dec
@@ -40,6 +50,8 @@
 [Protocols]
   gEfiLoadedImageProtocolGuid
   gEfiSimpleFileSystemProtocolGuid
+
+  gExynosI2cProtocolGuid
 
 [Guids]
   gEfiFileInfoGuid
