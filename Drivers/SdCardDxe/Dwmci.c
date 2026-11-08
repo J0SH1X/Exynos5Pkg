@@ -37,6 +37,7 @@
 #define DWMCI_CMDARG   0x28
 #define DWMCI_CMD      0x2C
 #define DWMCI_RESP0    0x30
+#define DWMCI_MINTSTS  0x40
 #define DWMCI_RINTSTS  0x44
 
 //
@@ -58,6 +59,33 @@
 #define DWMCI_IDSTS    0x8C
 #define DWMCI_IDINTEN  0x90
 #define DWMCI_CLKSEL   0x9C
+#define DWMCI_CDTHRCTL 0x100
+
+//
+// Exynos5420 HS400 ("DDR200") block: read-strobe enable, async FIFO, delay
+// line.  The kernel uses 0x110/0x114/0x118 + 0x70 on this SoC.
+//
+#define DWMCI_DDR200_RDDQS_EN     0x180
+#define DWMCI_DDR200_ASYNC_FIFO   0x184
+#define DWMCI_DDR200_DLINE_CTRL   0x188
+#define RDDQS_TXDT_CRC_FASTLIMIT(x)  (((x) & 0xFF) << 16)
+#define RDDQS_TXDT_CRC_INITVAL(x)    (((x) & 0xFF) << 8)
+#define RDDQS_RESP_RCLK_MODE         (1U << 5)
+#define RDDQS_RDDQS_EN               (1U << 0)
+#define RDDQS_DEF  (RDDQS_TXDT_CRC_FASTLIMIT (0x12) | RDDQS_TXDT_CRC_INITVAL (0x14))
+#define DLINE_FIFO_CLK_DELAY(x)      (((x) & 0x3) << 16)
+#define DLINE_RD_DQS_DELAY(x)        ((x) & 0x3FF)
+#define DLINE_DEFAULT   (DLINE_FIFO_CLK_DELAY (2) | DLINE_RD_DQS_DELAY (0x40))
+#define DQS_DELAY_V1A   110      // board value (v1a: RD_DQS_DELAY_CTRL(110))
+
+//
+// CLKSEL (board-universal5420-mmc.c).
+//
+#define CLKSEL_SDR       0x03040000U
+#define CLKSEL_DDR200    0x01020002U
+#define CLKSEL_DDR52     0x03020000U
+#define CLKSEL_HS200     0x03030000U       // sdr timing with clk_drv 3 (board pdata)
+#define UHS_DDR_SLOT0    (1U << 16)
 
 //
 // IDMAC.
@@ -143,6 +171,156 @@
 #define DWMCI_FIFO_DEPTH  0x40
 
 
+
+UINT32
+DwmciRead (
+  IN MMC_HOST  *Host,
+  IN UINT32    Offset
+  )
+{
+  return MmioRead32 (Host->Base + Offset);
+}
+
+VOID
+DwmciWrite (
+  IN MMC_HOST  *Host,
+  IN UINT32    Offset,
+  IN UINT32    Value
+  )
+{
+  MmioWrite32 (Host->Base + Offset, Value);
+}
+
+//
+// Interrupts the command / data engine waits for (the SDIO card interrupt is
+// not among them: an SDIO client owns it).
+//
+#define INT_WANTED  (INT_CDONE | INT_DTO | INT_ERR)
+
+/**
+  Interrupt service routine: latch what the controller reports into
+  Host->IrqStatus (waiters look there), acknowledge it.  The SDIO card
+  interrupt is left pending for its owner.
+
+  @retval TRUE   The controller had something for us.
+**/
+BOOLEAN
+DwmciIsr (
+  IN MMC_HOST  *Host
+  )
+{
+  UINT32  Mint;
+  UINT32  IdSts;
+
+  Mint  = MmioRead32 (Host->Base + DWMCI_MINTSTS) & INT_WANTED;
+  IdSts = MmioRead32 (Host->Base + DWMCI_IDSTS) & IDSTS_ALL;
+  if ((Mint == 0) && (IdSts == 0)) {
+    return FALSE;
+  }
+  Host->IrqStatus |= Mint;
+  Host->IrqIdSts  |= IdSts;
+  Host->IrqCount++;
+  if (Mint != 0) {
+    MmioWrite32 (Host->Base + DWMCI_RINTSTS, Mint);
+  }
+  if (IdSts != 0) {
+    MmioWrite32 (Host->Base + DWMCI_IDSTS, IdSts);
+  }
+  return TRUE;
+}
+
+VOID
+DwmciIrqEnable (
+  IN MMC_HOST  *Host,
+  IN BOOLEAN   Enable
+  )
+{
+  if (Enable) {
+    Host->IrqStatus = 0;
+    Host->IrqIdSts  = 0;
+    MmioWrite32 (Host->Base + DWMCI_RINTSTS, RINTSTS_ACK (0xFFFFFFFFU));
+    MmioWrite32 (Host->Base + DWMCI_IDSTS, IDSTS_ALL);
+    MmioWrite32 (Host->Base + DWMCI_IDINTEN, 0x337);    // NI AI TI RI FBE DU CES
+    MmioWrite32 (Host->Base + DWMCI_INTMSK, INT_WANTED);
+    Host->IrqMode = TRUE;
+  } else {
+    Host->IrqMode = FALSE;
+    MmioWrite32 (Host->Base + DWMCI_INTMSK, 0);
+    MmioWrite32 (Host->Base + DWMCI_IDINTEN, 0);
+  }
+}
+
+/**
+  Wait until one of Mask shows up in the controller's raw status.  Polled
+  hosts read RINTSTS (the caller acknowledges); interrupt-driven hosts wait
+  for the ISR to latch it, with a safety poll in case an interrupt is lost
+  (counted in IrqMissed).
+
+  @param[out] Int   Status bits seen (RINTSTS layout).
+  @retval TRUE      A wanted bit arrived within TimeoutUs.
+**/
+STATIC
+BOOLEAN
+WaitStatus (
+  IN  MMC_HOST  *Host,
+  IN  UINT32    Mask,
+  IN  UINTN     TimeoutUs,
+  OUT UINT32    *Int
+  )
+{
+  UINTN   Waited;
+  UINT32  Now;
+
+  for (Waited = 0; Waited < TimeoutUs; ) {
+    if (Host->IrqMode) {
+      Now = Host->IrqStatus;
+      if ((Now & Mask) != 0) {
+        *Int = Now;
+        return TRUE;
+      }
+      if (Host->WaitIrq != NULL) {
+        Host->WaitIrq (Host, 100);
+      } else {
+        gBS->Stall (10);
+      }
+      Waited += 10;
+      //
+      // Lost-interrupt safety: after ~5 ms of silence look at the hardware.
+      //
+      if ((Waited % 5000) == 0) {
+        if ((MmioRead32 (Host->Base + DWMCI_RINTSTS) & INT_WANTED & Mask) != 0) {
+          Host->IrqMissed++;
+          DwmciIsr (Host);
+        }
+      }
+    } else {
+      Now = MmioRead32 (Host->Base + DWMCI_RINTSTS);
+      if ((Now & Mask) != 0) {
+        *Int = Now;
+        return TRUE;
+      }
+      gBS->Stall (10);
+      Waited += 10;
+    }
+  }
+  *Int = Host->IrqMode ? Host->IrqStatus : MmioRead32 (Host->Base + DWMCI_RINTSTS);
+  return FALSE;
+}
+
+STATIC
+VOID
+AckStatus (
+  IN MMC_HOST  *Host,
+  IN UINT32    Bits
+  )
+{
+  if (Host->IrqMode) {
+    Host->IrqStatus &= ~Bits;
+  } else {
+    MmioWrite32 (Host->Base + DWMCI_RINTSTS, RINTSTS_ACK (Bits));
+  }
+}
+
 STATIC
 BOOLEAN
 WaitCmdIdle (
@@ -196,6 +374,7 @@ DwmciSendCmd (
   }
 
   MmioWrite32 (Host->Base + DWMCI_RINTSTS, RINTSTS_ACK (0xFFFFFFFFU));
+  Host->IrqStatus = 0;
   MmioWrite32 (Host->Base + DWMCI_CMDARG, Arg);
 
   //
@@ -231,31 +410,25 @@ DwmciSendCmd (
   //
   // Command done or error (~1 s).  A missing card answers with RTO quickly.
   //
-  for (Retry = 0; Retry < 10000; Retry++) {
-    Int = MmioRead32 (Host->Base + DWMCI_RINTSTS);
-    if (Int & INT_ERR) {
-      MmioWrite32 (Host->Base + DWMCI_RINTSTS, RINTSTS_ACK (Int));
-      //
-      // Identification probes time out by design (CMD8 on MMC / SD v1,
-      // ACMD41 / CMD55 on an empty slot); data and stop commands must not.
-      //
-      if ((Flags & HOST_CMD_DATA) || (Cmd == 12) || (Cmd == 13)) {
-        DEBUG ((DEBUG_ERROR, "Dwmci %x: cmd %u arg 0x%x INT 0x%x STATUS 0x%x\n",
-                Host->Base, Cmd, Arg, Int, MmioRead32 (Host->Base + DWMCI_STATUS)));
-      }
-      return (Int & INT_RTO) ? EFI_TIMEOUT : EFI_DEVICE_ERROR;
+  WaitStatus (Host, INT_CDONE | INT_ERR, 1000000, &Int);
+  if (Int & INT_ERR) {
+    AckStatus (Host, Int & (INT_ERR | INT_CDONE));
+    //
+    // Identification probes time out by design (CMD8 on MMC / SD v1,
+    // ACMD41 / CMD55 on an empty slot); data and stop commands must not.
+    //
+    if ((Flags & HOST_CMD_DATA) || (Cmd == 12) || (Cmd == 13)) {
+      DEBUG ((DEBUG_ERROR, "Dwmci %x: cmd %u arg 0x%x INT 0x%x STATUS 0x%x\n",
+              Host->Base, Cmd, Arg, Int, MmioRead32 (Host->Base + DWMCI_STATUS)));
     }
-    if (Int & INT_CDONE) {
-      MmioWrite32 (Host->Base + DWMCI_RINTSTS, INT_CDONE);
-      break;
-    }
-    gBS->Stall (100);
+    return (Int & INT_RTO) ? EFI_TIMEOUT : EFI_DEVICE_ERROR;
   }
   if (!(Int & INT_CDONE)) {
     DEBUG ((DEBUG_ERROR, "Dwmci %x: cmd %u no CDONE, RINTSTS 0x%x STATUS 0x%x\n",
             Host->Base, Cmd, Int, MmioRead32 (Host->Base + DWMCI_STATUS)));
     return EFI_TIMEOUT;
   }
+  AckStatus (Host, INT_CDONE);
 
   if (Resp != NULL) {
     Resp[0] = MmioRead32 (Host->Base + DWMCI_RESP0);
@@ -265,6 +438,36 @@ DwmciSendCmd (
   }
 
   return EFI_SUCCESS;
+}
+
+/**
+  Push the clock registers into the CIU with the update-clock pseudo command.
+  The normal form waits for the previous data transfer; a card wedged in a
+  failed fast mode holds DAT0 busy for good and the command never completes.
+  Then reset the controller (CTRL/FIFO/DMA) and push without that wait.
+**/
+STATIC
+BOOLEAN
+ClockUpdate (
+  IN MMC_HOST  *Host
+  )
+{
+  UINTN  Retry;
+
+  MmioWrite32 (Host->Base + DWMCI_CMD, CMD_ONLY_CLK);
+  if (WaitCmdIdle (Host, 500)) {
+    return TRUE;
+  }
+  MmioWrite32 (Host->Base + DWMCI_CTRL, MmioRead32 (Host->Base + DWMCI_CTRL) | CTRL_ALL_RESET);
+  for (Retry = 0; Retry < 1000; Retry++) {
+    if (!(MmioRead32 (Host->Base + DWMCI_CTRL) & CTRL_ALL_RESET)) {
+      break;
+    }
+    gBS->Stall (10);
+  }
+  MmioOr32 (Host->Base + DWMCI_CTRL, CTRL_INT_ENABLE);
+  MmioWrite32 (Host->Base + DWMCI_CMD, CMD_START | CMD_SEND_CLK_ONLY);
+  return WaitCmdIdle (Host, 500);
 }
 
 /**
@@ -281,11 +484,11 @@ DwmciSetClock (
 {
   UINT32  Div;
 
+  Host->ClockHz = ClockHz;
   WaitCmdIdle (Host, 500);
 
   MmioWrite32 (Host->Base + DWMCI_CLKENA, 0);
-  MmioWrite32 (Host->Base + DWMCI_CMD, CMD_ONLY_CLK);
-  if (!WaitCmdIdle (Host, 500)) {
+  if (!ClockUpdate (Host)) {
     DEBUG ((DEBUG_ERROR, "Dwmci %x: clock gate update timed out\n", Host->Base));
     return EFI_TIMEOUT;
   }
@@ -306,18 +509,87 @@ DwmciSetClock (
 
   MmioWrite32 (Host->Base + DWMCI_CLKSRC, 0);
   MmioWrite32 (Host->Base + DWMCI_CLKDIV, Div);
-  MmioWrite32 (Host->Base + DWMCI_CMD, CMD_ONLY_CLK);
-  if (!WaitCmdIdle (Host, 500)) {
+  if (!ClockUpdate (Host)) {
     DEBUG ((DEBUG_ERROR, "Dwmci %x: clock divider update timed out\n", Host->Base));
     return EFI_TIMEOUT;
   }
 
   MmioWrite32 (Host->Base + DWMCI_CLKENA, 1);
-  MmioWrite32 (Host->Base + DWMCI_CMD, CMD_ONLY_CLK);
-  if (!WaitCmdIdle (Host, 500)) {
+  if (!ClockUpdate (Host)) {
     DEBUG ((DEBUG_ERROR, "Dwmci %x: clock enable update timed out\n", Host->Base));
     return EFI_TIMEOUT;
   }
+  return EFI_SUCCESS;
+}
+
+
+/**
+  Program the controller for a speed mode: CLKSEL phases / divider, UHS DDR
+  select, and for HS400 the read-strobe block.  The card clock is gated; the
+  caller picks the card clock with SetClock afterwards.  The CMU is the
+  environment's business (Host->SetSourceClock).
+**/
+STATIC
+EFI_STATUS
+EFIAPI
+DwmciSetSpeed (
+  IN MMC_HOST   *Host,
+  IN MMC_SPEED  Speed
+  )
+{
+  UINT32      ClkSel;
+  UINT32      Uhs;
+  UINT32      Rddqs;
+  UINT32      Dline;
+  UINT32      Thr;
+  UINT32      Ciu;
+  EFI_STATUS  Status;
+
+  ClkSel = CLKSEL_SDR;
+  Uhs    = 0;
+  Rddqs  = RDDQS_DEF;
+  Dline  = DLINE_DEFAULT;
+  Thr    = 0;
+  if (Speed == MmcSpeedHs200) {
+    ClkSel = (CLKSEL_HS200 & ~7U) | ((Host->SamplePhase <= 7) ? Host->SamplePhase : 0);
+    Uhs    = 1;                                // 1.8 V signalling
+  } else if (Speed == MmcSpeedDdr52) {
+    ClkSel = (CLKSEL_DDR52 & ~7U) | ((Host->SamplePhase <= 7) ? Host->SamplePhase : (CLKSEL_DDR52 & 7));
+    Uhs    = UHS_DDR_SLOT0 | (Host->Uhs1V8 & 1);
+    if (Host->ThrOverride != 0xFFFFFFFFU) {
+      Thr = Host->ThrOverride;
+    }
+  } else if (Speed == MmcSpeedHs400Es) {
+    if (Host->SetSourceClock == NULL) {
+      return EFI_UNSUPPORTED;
+    }
+    ClkSel = (CLKSEL_DDR200 & ~7U) | ((Host->SamplePhase <= 7) ? Host->SamplePhase : (CLKSEL_DDR200 & 7));
+    Uhs    = UHS_DDR_SLOT0 | (Host->Uhs1V8 & 1);
+    Rddqs  = RDDQS_DEF | RDDQS_RDDQS_EN | (Host->Strobe ? RDDQS_RESP_RCLK_MODE : 0);
+    Dline  = DLINE_FIFO_CLK_DELAY (2) | DLINE_RD_DQS_DELAY (Host->DqsDelay);
+    Thr    = (Host->ThrOverride != 0xFFFFFFFFU) ? Host->ThrOverride : ((512U << 16) | 1);   // card read threshold (dw_mci_set_ios)
+  }
+
+  if ((Host->DrivePhase <= 7) && ((Speed == MmcSpeedDdr52) || (Speed == MmcSpeedHs400Es) || (Speed == MmcSpeedHs200))) {
+    ClkSel = (ClkSel & ~(7U << 16)) | (Host->DrivePhase << 16);
+  }
+  Status = DwmciSetClock (Host, 0);
+  if (EFI_ERROR (Status)) {
+    return Status;
+  }
+  if (Host->SetSourceClock != NULL) {
+    Status = Host->SetSourceClock (Host, Speed, ClkSel, &Ciu);
+    if (EFI_ERROR (Status)) {
+      return Status;
+    }
+    Host->MaxClockHz = Ciu;
+  }
+  MmioWrite32 (Host->Base + DWMCI_UHS_REG, Uhs);
+  MmioWrite32 (Host->Base + DWMCI_CLKSEL, ClkSel);
+  MmioWrite32 (Host->Base + DWMCI_CDTHRCTL, Thr);
+  MmioWrite32 (Host->Base + DWMCI_DDR200_RDDQS_EN, Rddqs);
+  MmioWrite32 (Host->Base + DWMCI_DDR200_DLINE_CTRL, Dline);
+  Host->Speed = Speed;
   return EFI_SUCCESS;
 }
 
@@ -431,7 +703,8 @@ DwmciPrepareData (
   WriteBackDataCacheRange (Host->DmaDesc, Count * DESC_WORDS * sizeof (UINT32));
 
   MmioWrite32 (Host->Base + DWMCI_IDSTS, IDSTS_ALL);
-  MmioWrite32 (Host->Base + DWMCI_IDINTEN, 0);
+  MmioWrite32 (Host->Base + DWMCI_IDINTEN, Host->IrqMode ? 0x337 : 0);
+  Host->IrqIdSts = 0;
   MmioWrite32 (Host->Base + DWMCI_DBADDR, Host->DmaDescPhys);
   MmioWrite32 (Host->Base + DWMCI_TMOUT, 0xFFFFFFFFU);
   MmioWrite32 (Host->Base + DWMCI_BLKSIZ, DataBlockSize (Host));
@@ -500,27 +773,48 @@ DwmciXferBlock (
   // Up to ~5 s: 512 KiB at the 1-bit identification clock is ~10 s worth
   // of bits, but only EXT_CSD (one block) is read that slowly.
   //
-  for (Retry = 0; Retry < 500000; Retry++) {
-    Int   = MmioRead32 (Host->Base + DWMCI_RINTSTS);
-    IdSts = MmioRead32 (Host->Base + DWMCI_IDSTS);
-    if ((Int & INT_ERR) || (IdSts & IDSTS_ERR)) {
-      break;
+  if (Host->IrqMode) {
+    //
+    // Interrupt driven: sleep until the ISR reports data-transfer-over or
+    // an error, then give the IDMAC a moment to hand the last descriptor
+    // back (OWN cleared).
+    //
+    WaitStatus (Host, INT_DTO | INT_ERR, 5000000, &Int);
+    IdSts = Host->IrqIdSts;
+    if ((Int & INT_DTO) && !(Int & INT_ERR) && !(IdSts & IDSTS_ERR)) {
+      for (Retry = 0; Retry < 10000; Retry++) {
+        InvalidateDataCacheRange ((VOID *)LastDesc, DESC_WORDS * sizeof (UINT32));
+        DmaDone = ((Host->IrqIdSts & Done) != 0) || ((LastDesc[0] & DES0_OWN) == 0);
+        if (DmaDone) {
+          break;
+        }
+        gBS->Stall (10);
+      }
+      IdSts = Host->IrqIdSts;
     }
-    if (Int & INT_DTO) {
-      //
-      // The IDMAC hands each descriptor back (OWN cleared) once its data
-      // is in memory; RI/TI in IDSTS does not latch with IDINTEN masked.
-      //
-      InvalidateDataCacheRange ((VOID *)LastDesc, DESC_WORDS * sizeof (UINT32));
-      DmaDone = ((IdSts & Done) != 0) || ((LastDesc[0] & DES0_OWN) == 0);
-      if (DmaDone) {
+    AckStatus (Host, Int);
+  } else {
+    for (Retry = 0; Retry < 500000; Retry++) {
+      Int   = MmioRead32 (Host->Base + DWMCI_RINTSTS);
+      IdSts = MmioRead32 (Host->Base + DWMCI_IDSTS);
+      if ((Int & INT_ERR) || (IdSts & IDSTS_ERR)) {
         break;
       }
+      if (Int & INT_DTO) {
+        //
+        // The IDMAC hands each descriptor back (OWN cleared) once its data
+        // is in memory; RI/TI in IDSTS does not latch with IDINTEN masked.
+        //
+        InvalidateDataCacheRange ((VOID *)LastDesc, DESC_WORDS * sizeof (UINT32));
+        DmaDone = ((IdSts & Done) != 0) || ((LastDesc[0] & DES0_OWN) == 0);
+        if (DmaDone) {
+          break;
+        }
+      }
+      gBS->Stall (10);
     }
-    gBS->Stall (10);
+    MmioWrite32 (Host->Base + DWMCI_RINTSTS, RINTSTS_ACK (Int));
   }
-
-  MmioWrite32 (Host->Base + DWMCI_RINTSTS, RINTSTS_ACK (Int));
   DwmciStopDma (Host);
 
   if ((Int & INT_ERR) || (IdSts & IDSTS_ERR) || !(Int & INT_DTO) || !DmaDone) {
@@ -571,6 +865,13 @@ DwmciInit (
   Host->PrepareData = DwmciPrepareData;
   Host->XferBlock   = DwmciXferBlock;
   Host->SetBusWidth = DwmciSetBusWidth;
+  Host->SetSpeed    = DwmciSetSpeed;
+  Host->DqsDelay    = DQS_DELAY_V1A;
+  Host->Uhs1V8      = 1;
+  Host->DrivePhase  = 0xFF;
+  Host->ThrOverride = 0xFFFFFFFFU;
+  Host->SamplePhase = 0xFF;                 // unset: each mode uses the board default
+  Host->Speed       = MmcSpeedDefault;
 
   VerId = MmioRead32 (Base + DWMCI_VERID) & 0xFFFF;
 

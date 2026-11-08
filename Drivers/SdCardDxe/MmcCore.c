@@ -51,6 +51,25 @@
 //
 #define CMD8_SEND_EXT_CSD    8
 #define EXT_CSD_SEC_COUNT    212
+#define EXT_CSD_STROBE_SUPPORT  184
+#define EXT_CSD_HS_TIMING       185
+#define EXT_CSD_BUS_WIDTH_IDX   183
+#define EXT_CSD_REV             192
+#define EXT_CSD_DEVICE_TYPE     196
+#define DEVICE_TYPE_HS52        (1U << 1)
+#define DEVICE_TYPE_HS400_1V8   (1U << 6)
+#define DEVICE_TYPE_DDR52_1V8   (1U << 2)
+#define DEVICE_TYPE_HS200_1V8   (1U << 4)
+#define HS_TIMING_HS200         2
+#define MMC_HS200_CLOCK_HZ      200000000U
+#define MMC_DDR52_CLOCK_HZ      52000000U
+#define HS_TIMING_LEGACY        0
+#define HS_TIMING_HS            1
+#define HS_TIMING_HS400         3
+#define BUS_WIDTH_DDR8          6
+#define BUS_WIDTH_STROBE        0x80
+#define MMC_HS_CLOCK_HZ         52000000U
+#define MMC_HS400_CLOCK_HZ      200000000U
 
 //
 // MMC CMD6 SWITCH: Access[25:24] Index[23:16] Value[15:8].
@@ -113,13 +132,23 @@ MmcWaitTran (
   EFI_STATUS  Status;
   UINT32      Resp[4];
   UINTN       Retry;
+  UINTN       Errors;
 
   Resp[0] = 0;
+  Errors  = 0;
   for (Retry = 0; Retry < 1000; Retry++) {
     Status = SendCmd (Host, CMD13_SEND_STATUS, (UINT32)Host->Card.Rca << 16,
                       HOST_CMD_RESP_SHORT, Resp);
     if (!EFI_ERROR (Status) && (R1_STATE (Resp[0]) == R1_STATE_TRAN)) {
       return EFI_SUCCESS;
+    }
+    //
+    // A card that does not answer at all (each try costs the command
+    // timeout, ~1 s) is not going to: give up after a few, the caller
+    // resets the card.  A busy card still answers.
+    //
+    if (EFI_ERROR (Status) && (++Errors >= 5)) {
+      break;
     }
     gBS->Stall (1000);
   }
@@ -317,16 +346,14 @@ ParseCsd (
 //
 // MMC CMD8 SEND_EXT_CSD: one 512-byte block, take SEC_COUNT as the capacity.
 //
-STATIC
 EFI_STATUS
-MmcReadExtCsd (
-  IN MMC_HOST  *Host
+MmcRefreshExtCsd (
+  IN  MMC_HOST  *Host,
+  OUT UINT8     *ExtCsd
   )
 {
-  EFI_STATUS    Status;
-  UINT32        Resp[4];
-  STATIC UINT8  ExtCsd[BLOCK_SIZE];
-  UINT32        SecCount;
+  EFI_STATUS  Status;
+  UINT32      Resp[4];
 
   Status = Host->PrepareData (Host, TRUE, 1, ExtCsd);
   if (EFI_ERROR (Status)) {
@@ -337,7 +364,20 @@ MmcReadExtCsd (
   if (EFI_ERROR (Status)) {
     return Status;
   }
-  Status = Host->XferBlock (Host, TRUE, 1, ExtCsd);
+  return Host->XferBlock (Host, TRUE, 1, ExtCsd);
+}
+
+STATIC
+EFI_STATUS
+MmcReadExtCsd (
+  IN MMC_HOST  *Host
+  )
+{
+  EFI_STATUS    Status;
+  STATIC UINT8  ExtCsd[BLOCK_SIZE];
+  UINT32        SecCount;
+
+  Status = MmcRefreshExtCsd (Host, ExtCsd);
   if (EFI_ERROR (Status)) {
     return Status;
   }
@@ -350,7 +390,10 @@ MmcReadExtCsd (
     return EFI_DEVICE_ERROR;
   }
 
-  Host->Card.BlockCount = SecCount;
+  Host->Card.BlockCount    = SecCount;
+  Host->Card.ExtCsdRev     = ExtCsd[EXT_CSD_REV];
+  Host->Card.DeviceType    = ExtCsd[EXT_CSD_DEVICE_TYPE];
+  Host->Card.StrobeSupport = ExtCsd[EXT_CSD_STROBE_SUPPORT];
   return EFI_SUCCESS;
 }
 
@@ -518,6 +561,236 @@ MmcTuneBus (
   }
 
   return EFI_DEVICE_ERROR;
+}
+
+
+/**
+  CMD6 SWITCH without waiting for the card to settle (the next command's
+  state depends on a host timing change that follows the switch, so CMD13
+  cannot be used in between).  The busy time is covered by the host's DAT0
+  wait in front of the next command.
+**/
+STATIC
+EFI_STATUS
+MmcSwitchNoWait (
+  IN MMC_HOST  *Host,
+  IN UINT32    Arg
+  )
+{
+  UINT32  Resp[4];
+
+  return SendCmd (Host, CMD6_SWITCH, Arg, HOST_CMD_RESP_BUSY, Resp);
+}
+
+//
+// Proof of a working mode: LBA 0 reads as a protective MBR, EXT_CSD reads
+// back with the speed bits we set.
+//
+STATIC
+EFI_STATUS
+MmcProveMode (
+  IN MMC_HOST  *Host,
+  IN UINT8     ExpectHsTiming
+  )
+{
+  EFI_STATUS    Status;
+  STATIC UINT8  Block[BLOCK_SIZE];
+  STATIC UINT8  Ext[BLOCK_SIZE];
+  UINTN         Index;
+
+  for (Index = 0; Index < 4; Index++) {
+    SetMem (Block, sizeof (Block), 0);
+    Status = MmcReadBlocks (Host, 0, 1, Block);
+    if (EFI_ERROR (Status)) {
+      return Status;
+    }
+    if ((Block[510] != 0x55) || (Block[511] != 0xAA)) {
+      return EFI_CRC_ERROR;
+    }
+  }
+  Status = MmcRefreshExtCsd (Host, Ext);
+  if (EFI_ERROR (Status)) {
+    return Status;
+  }
+  if ((Ext[EXT_CSD_HS_TIMING] & 0xF) != ExpectHsTiming) {
+    DEBUG ((DEBUG_ERROR, "MmcCore: HS_TIMING reads %u, want %u\n",
+            Ext[EXT_CSD_HS_TIMING] & 0xF, ExpectHsTiming));
+    return EFI_DEVICE_ERROR;
+  }
+  return EFI_SUCCESS;
+}
+
+STATIC
+EFI_STATUS
+MmcEnterHs (
+  IN MMC_HOST  *Host
+  )
+{
+  EFI_STATUS  Status;
+
+  if (!(Host->Card.DeviceType & DEVICE_TYPE_HS52) || (Host->SetSpeed == NULL)) {
+    return EFI_UNSUPPORTED;
+  }
+  Status = MmcSwitch (Host, SWITCH_ARG (SWITCH_ACCESS_WRITE_BYTE, EXT_CSD_HS_TIMING, HS_TIMING_HS));
+  if (EFI_ERROR (Status)) {
+    return Status;
+  }
+  Status = Host->SetSpeed (Host, MmcSpeedHs);
+  if (!EFI_ERROR (Status)) {
+    Status = Host->SetClock (Host, MIN (Host->MaxClockHz, MMC_HS_CLOCK_HZ));
+  }
+  if (!EFI_ERROR (Status)) {
+    Status = MmcProveMode (Host, HS_TIMING_HS);
+  }
+  return Status;
+}
+
+/**
+  Card reset + full identification at the default speed (the way back from
+  any faster mode, and the recovery after a failed switch).
+**/
+STATIC
+EFI_STATUS
+MmcBackToDefault (
+  IN MMC_HOST  *Host
+  )
+{
+  if (Host->SetSpeed != NULL) {
+    Host->SetSpeed (Host, MmcSpeedDefault);
+  }
+  Host->SetClock (Host, 400000);
+  Host->SetBusWidth (Host, 1);
+  return MmcInitCard (Host, TRUE);
+}
+
+/**
+  Switch the eMMC to a speed mode.  HS400 goes through HS, then the
+  enhanced-strobe sequence of mmc.c (8-bit DDR + strobe, HS_TIMING 3, host
+  timing, clock).  Any failure puts the card back to the default speed by
+  re-initialising it.
+
+  @retval EFI_SUCCESS      Mode active and proven.
+  @retval EFI_UNSUPPORTED  Card or host cannot do it (nothing changed).
+  @retval other            Mode failed; the card is back at default speed.
+**/
+EFI_STATUS
+MmcSetSpeed (
+  IN MMC_HOST   *Host,
+  IN MMC_SPEED  Speed
+  )
+{
+  EFI_STATUS  Status;
+
+  if (Host->Card.Type != CardTypeMmc) {
+    return EFI_UNSUPPORTED;
+  }
+  if (Speed == Host->Speed) {
+    return EFI_SUCCESS;
+  }
+
+  if ((Speed == MmcSpeedDefault) || (Host->Speed == MmcSpeedHs400Es) || (Host->Speed == MmcSpeedDdr52) || (Host->Speed == MmcSpeedHs200)) {
+    Status = MmcBackToDefault (Host);
+    if (EFI_ERROR (Status) || (Speed == MmcSpeedDefault)) {
+      return Status;
+    }
+  }
+
+  if ((Speed == MmcSpeedHs200) &&
+      (!(Host->Card.DeviceType & DEVICE_TYPE_HS200_1V8) || (Host->Card.BusWidth != 8) || (Host->SetSourceClock == NULL))) {
+    return EFI_UNSUPPORTED;
+  }
+  if ((Speed == MmcSpeedDdr52) &&
+      (!(Host->Card.DeviceType & DEVICE_TYPE_DDR52_1V8) || (Host->Card.BusWidth != 8))) {
+    return EFI_UNSUPPORTED;
+  }
+  if ((Speed == MmcSpeedHs400Es) &&
+      (!(Host->Card.DeviceType & DEVICE_TYPE_HS400_1V8) || (Host->SetSourceClock == NULL) || (Host->Card.BusWidth != 8))) {
+    return EFI_UNSUPPORTED;
+  }
+
+  Status = EFI_SUCCESS;
+  if (Speed == MmcSpeedHs200) {
+    Status = MmcSwitch (Host, SWITCH_ARG (SWITCH_ACCESS_WRITE_BYTE, EXT_CSD_HS_TIMING, HS_TIMING_HS200));
+    if (!EFI_ERROR (Status)) {
+      Status = Host->SetSpeed (Host, MmcSpeedHs200);
+    }
+    if (!EFI_ERROR (Status)) {
+      Status = Host->SetClock (Host, MIN (Host->MaxClockHz, (Host->DdrClockHz != 0) ? Host->DdrClockHz : MMC_HS200_CLOCK_HZ));
+    }
+    if (!EFI_ERROR (Status)) {
+      Status = MmcProveMode (Host, HS_TIMING_HS200);
+    }
+    if (EFI_ERROR (Status)) {
+      DEBUG ((DEBUG_ERROR, "MmcCore: speed mode %u failed - %r, back to default\n", Speed, Status));
+      MmcBackToDefault (Host);
+      return Status;
+    }
+    DEBUG ((DEBUG_INFO, "MmcCore: eMMC speed mode %u (HS200), MaxClock %u Hz\n", Speed, Host->MaxClockHz));
+    return EFI_SUCCESS;
+  }
+  if (Host->Speed == MmcSpeedDefault) {
+    Status = MmcEnterHs (Host);
+  }
+
+  if (!EFI_ERROR (Status) && (Speed == MmcSpeedDdr52)) {
+    Status = MmcSwitch (Host, SWITCH_ARG (SWITCH_ACCESS_WRITE_BYTE, EXT_CSD_BUS_WIDTH_IDX, BUS_WIDTH_DDR8));
+    if (!EFI_ERROR (Status)) {
+      //
+      // Diagnostic: the card should now be in DDR while the host still runs
+      // SDR, so an EXT_CSD read must fail (half data); if it succeeds the
+      // card ignored the bus-width switch.
+      //
+      STATIC UINT8  Probe[BLOCK_SIZE];
+      EFI_STATUS    ProbeStatus;
+
+      ProbeStatus = MmcRefreshExtCsd (Host, Probe);
+      DEBUG ((DEBUG_INFO, "MmcCore: card BUS_WIDTH switched to DDR8; SDR host reads EXT_CSD: %r (BUS_WIDTH %u HS_TIMING %u)\n",
+              ProbeStatus, Probe[EXT_CSD_BUS_WIDTH_IDX], Probe[EXT_CSD_HS_TIMING]));
+      MmcWaitTran (Host);
+      Status = Host->SetSpeed (Host, MmcSpeedDdr52);
+    }
+    if (!EFI_ERROR (Status)) {
+      Status = Host->SetClock (Host, MIN (Host->MaxClockHz, (Host->DdrClockHz != 0) ? Host->DdrClockHz : MMC_DDR52_CLOCK_HZ));
+    }
+    if (!EFI_ERROR (Status)) {
+      Status = MmcProveMode (Host, HS_TIMING_HS);
+    }
+  }
+
+  if (!EFI_ERROR (Status) && (Speed == MmcSpeedHs400Es)) {
+    //
+    // 8-bit DDR with enhanced strobe, then HS400 timing.  The card clock
+    // stays at <= 52 MHz until the host side has switched.
+    //
+    Host->Strobe = (Host->Card.StrobeSupport & 1) != 0;
+    Status = MmcSwitch (Host, SWITCH_ARG (SWITCH_ACCESS_WRITE_BYTE, EXT_CSD_BUS_WIDTH_IDX,
+                                          BUS_WIDTH_DDR8 | (Host->Strobe ? BUS_WIDTH_STROBE : 0)));
+    if (!EFI_ERROR (Status)) {
+      Status = MmcSwitchNoWait (Host, SWITCH_ARG (SWITCH_ACCESS_WRITE_BYTE, EXT_CSD_HS_TIMING,
+                                                  HS_TIMING_HS400));
+    }
+    if (!EFI_ERROR (Status)) {
+      Status = Host->SetSpeed (Host, MmcSpeedHs400Es);
+    }
+    if (!EFI_ERROR (Status)) {
+      Status = Host->SetClock (Host, MIN (Host->MaxClockHz, (Host->DdrClockHz != 0) ? Host->DdrClockHz : MMC_HS400_CLOCK_HZ));
+    }
+    if (!EFI_ERROR (Status)) {
+      Status = MmcWaitTran (Host);
+    }
+    if (!EFI_ERROR (Status)) {
+      Status = MmcProveMode (Host, HS_TIMING_HS400);
+    }
+  }
+
+  if (EFI_ERROR (Status)) {
+    DEBUG ((DEBUG_ERROR, "MmcCore: speed mode %u failed - %r, back to default\n", Speed, Status));
+    MmcBackToDefault (Host);
+    return Status;
+  }
+
+  DEBUG ((DEBUG_INFO, "MmcCore: eMMC speed mode %u, MaxClock %u Hz\n", Speed, Host->MaxClockHz));
+  return EFI_SUCCESS;
 }
 
 /**
@@ -813,6 +1086,9 @@ MmcReadBlocks (
     if (EFI_ERROR (Status)) {
       DEBUG ((DEBUG_ERROR, "MmcCore: 0x%x read LBA %lu x%u failed - %r\n",
               Host->Base, Lba + (Blocks - Remaining), Chunk, Status));
+      if ((Host->Speed == MmcSpeedHs400Es) || (Host->Speed == MmcSpeedDdr52) || (Host->Speed == MmcSpeedHs200)) {
+        return Status;          // the caller resets the card; no slow abort / retry dance
+      }
       MmcAbortData (Host, Chunk);
       if (Chunk == 1) {
         return Status;
@@ -917,6 +1193,9 @@ MmcWriteBlocks (
     if (EFI_ERROR (Status)) {
       DEBUG ((DEBUG_ERROR, "MmcCore: 0x%x write LBA %lu x%u failed - %r\n",
               Host->Base, Lba + (Blocks - Remaining), Chunk, Status));
+      if ((Host->Speed == MmcSpeedHs400Es) || (Host->Speed == MmcSpeedDdr52) || (Host->Speed == MmcSpeedHs200)) {
+        return Status;          // the caller resets the card; no slow abort / retry dance
+      }
       MmcAbortData (Host, Chunk);
       if (Chunk == 1) {
         return Status;

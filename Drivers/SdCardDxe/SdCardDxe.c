@@ -21,6 +21,9 @@
 
 #include "SdCardDxe.h"
 
+#include <Protocol/HardwareInterrupt.h>
+#include <Protocol/ExynosMmcTest.h>
+
 //
 // CMU (EXYNOS5_PA_CMU = 0x10010000, regs-clock.h offsets).
 //
@@ -36,6 +39,7 @@
 #define CLK_SRC_MASK_FSYS   (CMU_BASE + 0x10340)
 #define CLK_DIV_FSYS1       (CMU_BASE + 0x1054C)
 #define CLK_GATE_IP_FSYS    (CMU_BASE + 0x10944)
+#define CLK_DIV_STAT_FSYS1  (CMU_BASE + 0x1064C)
 
 #define XXTI_HZ             24000000U
 #define MUX_SRC_CPLL        1
@@ -446,6 +450,269 @@ SdBoardInit (
   gBS->Stall (20000);      // rail ramp + card power-up (SD spec: >= 1 ms)
 }
 
+
+//
+// ---------------------------------------------------------------------------
+// Speed modes: the CMU side, interrupt, test protocol.
+// ---------------------------------------------------------------------------
+//
+
+//
+// eMMC interrupt: EXYNOS5_IRQ_HSMMC0 = IRQ_SPI(75) = GIC INTID 107.
+//
+#define EMMC_IRQ  107
+
+//
+// sclk_dwmci0 = CPLL / (N + 1).  N = 0 (666 MHz) for the default / high-speed
+// modes (CIU 166.5 MHz after CLKSEL / 4, as the kernel's bus_hz); HS400 uses
+// the kernel's HS200_DDR table row: sclk 333 MHz (N = 1), CLKSEL / 2.
+//
+STATIC UINT32  mHs400DivN = 1;
+
+STATIC EFI_HARDWARE_INTERRUPT_PROTOCOL  *mGic;
+STATIC BOOLEAN                          mIrqRouted;
+
+STATIC
+VOID
+EFIAPI
+EmmcInterruptHandler (
+  IN HARDWARE_INTERRUPT_SOURCE  Source,
+  IN EFI_SYSTEM_CONTEXT         SystemContext
+  )
+{
+  DwmciIsr (&mEmmcHost);
+  mGic->EndOfInterrupt (mGic, Source);
+}
+
+STATIC
+EFI_STATUS
+EFIAPI
+EmmcSourceClock (
+  IN  MMC_HOST   *Host,
+  IN  MMC_SPEED  Speed,
+  IN  UINT32     ClkSel,
+  OUT UINT32     *CiuHz
+  )
+{
+  UINT32  N;
+  UINT32  Cpll;
+  UINTN   Retry;
+
+  N    = (Speed == MmcSpeedHs400Es) ? mHs400DivN : 0;
+  Cpll = PllRate (CLK_CPLL_CON0);
+  if (Cpll == 0) {
+    return EFI_NOT_READY;
+  }
+  MmioAndThenOr32 (CLK_DIV_FSYS1, ~(0x3FFU << mClk0.DivShift), N << mClk0.DivShift);
+  for (Retry = 0; Retry < 1000; Retry++) {
+    if (MmioRead32 (CLK_DIV_STAT_FSYS1) == 0) {
+      break;
+    }
+    gBS->Stall (10);
+  }
+  *CiuHz = (Cpll / (N + 1)) / CLKSEL_CIU_DIV (ClkSel);
+  return EFI_SUCCESS;
+}
+
+STATIC
+EFI_STATUS
+EFIAPI
+TestGetInfo (
+  IN  EXYNOS_MMC_TEST_PROTOCOL  *This,
+  OUT EXYNOS_MMC_INFO           *Info
+  )
+{
+  ZeroMem (Info, sizeof (*Info));
+  Info->Base          = mEmmcHost.Base;
+  Info->Speed         = mEmmcHost.Speed;
+  Info->BusWidth      = mEmmcHost.Card.BusWidth;
+  Info->ClockHz       = mEmmcHost.ClockHz;
+  Info->CiuHz         = mEmmcHost.MaxClockHz;
+  Info->IrqMode       = mEmmcHost.IrqMode;
+  Info->IrqCount      = mEmmcHost.IrqCount;
+  Info->IrqMissed     = mEmmcHost.IrqMissed;
+  Info->DqsDelay      = mEmmcHost.DqsDelay;
+  Info->BlockCount    = mEmmcHost.Card.BlockCount;
+  Info->ExtCsdRev     = mEmmcHost.Card.ExtCsdRev;
+  Info->DeviceType    = mEmmcHost.Card.DeviceType;
+  Info->StrobeSupport = mEmmcHost.Card.StrobeSupport;
+  return EFI_SUCCESS;
+}
+
+STATIC
+EFI_STATUS
+EFIAPI
+TestSetSpeed (
+  IN EXYNOS_MMC_TEST_PROTOCOL  *This,
+  IN UINT32                    Speed
+  )
+{
+  return (Speed < MmcSpeedCount) ? MmcSetSpeed (&mEmmcHost, (MMC_SPEED)Speed) : EFI_INVALID_PARAMETER;
+}
+
+STATIC
+EFI_STATUS
+EFIAPI
+TestSetIrq (
+  IN EXYNOS_MMC_TEST_PROTOCOL  *This,
+  IN BOOLEAN                   On
+  )
+{
+  if (!mIrqRouted) {
+    return EFI_UNSUPPORTED;
+  }
+  if (On) {
+    DwmciIrqEnable (&mEmmcHost, TRUE);
+    mGic->EnableInterruptSource (mGic, EMMC_IRQ);
+  } else {
+    mGic->DisableInterruptSource (mGic, EMMC_IRQ);
+    DwmciIrqEnable (&mEmmcHost, FALSE);
+  }
+  return EFI_SUCCESS;
+}
+
+STATIC
+EFI_STATUS
+EFIAPI
+TestSetClock (
+  IN EXYNOS_MMC_TEST_PROTOCOL  *This,
+  IN UINT32                    Hz
+  )
+{
+  return mEmmcHost.SetClock (&mEmmcHost, Hz);
+}
+
+STATIC
+EFI_STATUS
+EFIAPI
+TestSetDqs (
+  IN EXYNOS_MMC_TEST_PROTOCOL  *This,
+  IN UINT32                    Delay
+  )
+{
+  UINT32  Hz;
+
+  mEmmcHost.DqsDelay = Delay & 0x3FF;
+  if (mEmmcHost.Speed == MmcSpeedHs400Es) {
+    Hz = mEmmcHost.ClockHz;
+    mEmmcHost.SetClock (&mEmmcHost, 0);
+    DwmciWrite (&mEmmcHost, 0x188, (2U << 16) | mEmmcHost.DqsDelay);
+    return mEmmcHost.SetClock (&mEmmcHost, Hz);
+  }
+  return EFI_SUCCESS;
+}
+
+STATIC
+EFI_STATUS
+EFIAPI
+TestRead (
+  IN  EXYNOS_MMC_TEST_PROTOCOL  *This,
+  IN  UINT64                    Lba,
+  IN  UINTN                     Blocks,
+  OUT VOID                      *Buffer
+  )
+{
+  return MmcReadBlocks (&mEmmcHost, Lba, Blocks, Buffer);
+}
+
+STATIC
+EFI_STATUS
+EFIAPI
+TestWrite (
+  IN EXYNOS_MMC_TEST_PROTOCOL  *This,
+  IN UINT64                    Lba,
+  IN UINTN                     Blocks,
+  IN VOID                      *Buffer
+  )
+{
+  return MmcWriteBlocks (&mEmmcHost, Lba, Blocks, Buffer);
+}
+
+STATIC
+EFI_STATUS
+EFIAPI
+TestReadExtCsd (
+  IN  EXYNOS_MMC_TEST_PROTOCOL  *This,
+  OUT UINT8                     *Buffer
+  )
+{
+  return MmcRefreshExtCsd (&mEmmcHost, Buffer);
+}
+
+STATIC
+EFI_STATUS
+EFIAPI
+TestSetSample (
+  IN EXYNOS_MMC_TEST_PROTOCOL  *This,
+  IN UINT32                    Phase
+  )
+{
+  mEmmcHost.SamplePhase = Phase & 7;
+  return EFI_SUCCESS;
+}
+
+STATIC
+EFI_STATUS
+EFIAPI
+TestSetOptions (
+  IN EXYNOS_MMC_TEST_PROTOCOL  *This,
+  IN UINT32                    Uhs1V8,
+  IN UINT32                    CardThreshold
+  )
+{
+  mEmmcHost.Uhs1V8      = Uhs1V8 & 1;
+  mEmmcHost.ThrOverride = CardThreshold;
+  return EFI_SUCCESS;
+}
+
+STATIC
+EFI_STATUS
+EFIAPI
+TestSetTiming (
+  IN EXYNOS_MMC_TEST_PROTOCOL  *This,
+  IN UINT32                    DrivePhase,
+  IN UINT32                    DdrClockHz
+  )
+{
+  mEmmcHost.DrivePhase = DrivePhase;
+  mEmmcHost.DdrClockHz = DdrClockHz;
+  return EFI_SUCCESS;
+}
+
+STATIC EXYNOS_MMC_TEST_PROTOCOL  mTest = {
+  TestGetInfo, TestSetSpeed, TestSetIrq, TestSetClock, TestSetDqs, TestRead, TestWrite, TestReadExtCsd, TestSetTiming, TestSetOptions, TestSetSample
+};
+
+/**
+  Route the eMMC interrupt (left disabled until the test app switches the
+  controller to interrupt mode), hook the CMU for the speed modes and publish
+  the test protocol.
+**/
+STATIC
+VOID
+EmmcSpeedSetup (
+  VOID
+  )
+{
+  EFI_STATUS  Status;
+  EFI_HANDLE  Handle;
+
+  mEmmcHost.SetSourceClock = EmmcSourceClock;
+
+  Status = gBS->LocateProtocol (&gHardwareInterruptProtocolGuid, NULL, (VOID **)&mGic);
+  if (!EFI_ERROR (Status)) {
+    Status = mGic->RegisterInterruptSource (mGic, EMMC_IRQ, EmmcInterruptHandler);
+    if (!EFI_ERROR (Status)) {
+      mGic->DisableInterruptSource (mGic, EMMC_IRQ);
+      mIrqRouted = TRUE;
+    }
+  }
+  DEBUG ((DEBUG_INFO, "SdCard: eMMC interrupt %u %a\n", EMMC_IRQ, mIrqRouted ? "routed" : "not available"));
+
+  Handle = NULL;
+  gBS->InstallProtocolInterface (&Handle, &gExynosMmcTestProtocolGuid, EFI_NATIVE_INTERFACE, &mTest);
+}
+
 //
 // ---------------------------------------------------------------------------
 // Probe.
@@ -472,6 +739,7 @@ ProbeEmmc (
                       DWMCI_SDR_TIMING, TRUE);
   if (!EFI_ERROR (Status)) {
     mEmmcBlkIo.Media.MediaId = 0;
+    EmmcSpeedSetup ();
     Status = SetupBlockIo (&mEmmcBlkIo, &mEmmcHost, TRUE, &mEmmcDevicePath);
   }
   if (EFI_ERROR (Status)) {

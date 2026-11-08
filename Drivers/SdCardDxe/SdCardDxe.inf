@@ -25,6 +25,7 @@
 [Packages]
   MdePkg/MdePkg.dec
   ArmPkg/ArmPkg.dec
+  EmbeddedPkg/EmbeddedPkg.dec
   Exynos5420Pkg/Exynos5420Pkg.dec
 
 [LibraryClasses]
@@ -42,6 +43,8 @@
   gEfiBlockIoProtocolGuid
   gEfiDevicePathProtocolGuid
   gExynosGpioProtocolGuid
+  gExynosMmcTestProtocolGuid
+  gHardwareInterruptProtocolGuid
 
 [Depex]
-  gExynosGpioProtocolGuid
+  gExynosGpioProtocolGuid AND gHardwareInterruptProtocolGuid
