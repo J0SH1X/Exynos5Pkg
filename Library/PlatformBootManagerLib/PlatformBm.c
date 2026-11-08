@@ -1099,6 +1099,16 @@ PlatformBootManagerAfterConsole (
   // GOP once ConSplitter has adopted our framebuffer's GOP.
   //
   Status = BootLogoEnableLogo ();
+  DEBUG ((DEBUG_INFO, "%a: splash: %r\n", __FUNCTION__, Status));
+
+  //
+  // Hold the splash on screen for a moment.  BootMenu() ClearScreens the
+  // panel as soon as it starts, so without this the logo would be visible
+  // only for the blink between here and the menu.
+  //
+  if (!EFI_ERROR (Status)) {
+    gBS->Stall (1500 * 1000);
+  }
 
 
   // Re-enumerate boot options from all file systems / firmware volumes.

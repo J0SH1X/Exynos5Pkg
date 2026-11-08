@@ -184,6 +184,10 @@ APRIORI DXE {
   # The bootloader's framebuffer, published as a GOP
   INF Exynos5420Pkg/Drivers/SimpleFbDxe/SimpleFbDxe.inf
 
+  # Platform splash (blocky "EXYNOS5420PKG" art), drawn by BootLogoLib from
+  # PlatformBm's BootLogoEnableLogo().
+  INF Exynos5420Pkg/Drivers/LogoDxe/LogoDxe.inf
+
   # Milestone 2: no platform drivers (clock/GPIO/I2C/keypad/touch/storage/
   # USB/ACPI) yet.  Everything below is generic EDK II.
 

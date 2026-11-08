@@ -1,0 +1,12 @@
+// /** @file
+// Exynos5420Pkg platform logo.
+//
+// Publishes the blocky "EXYNOS5420PKG" art bitmap through the EDKII
+// Platform Logo protocol.
+//
+// SPDX-License-Identifier: BSD-2-Clause-Patent
+// **/
+
+#string STR_MODULE_ABSTRACT             #language en-US "Exynos5420Pkg platform logo"
+
+#string STR_MODULE_DESCRIPTION          #language en-US "Publishes the blocky EXYNOS5420PKG logo bitmap through the EDKII Platform Logo protocol."

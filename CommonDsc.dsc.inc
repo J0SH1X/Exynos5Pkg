@@ -286,11 +286,15 @@
   # Memory layout: 2 GB DRAM starting at 0x20000000 (the Exynos5420 Galaxy
   # tab base per u-boot's exynos5420-galaxy-tab-common.h).  The FD sits at
   # 0x50000000 (768 MB in), clear of the low-DRAM bootloader payload and of
-  # the framebuffer at 0x67000000.  Top 16 MB is the UEFI/PEI region.
+  # the framebuffer at 0x67000000.  Top 64 MB is the UEFI/PEI region:
+  # PrePi's LZMA step peaks at ~2x the decompressed FVMAIN (destination
+  # buffer + the aligned FV copy, ~18 MB for the 9 MB FVMAIN the LogoDxe
+  # splash produced), which did not fit the old 16 MB pool and asserted
+  # EFI_OUT_OF_RESOURCES in DecompressFirstFv().  64 MB matches ArmVirtPkg.
   #
   gArmTokenSpaceGuid.PcdSystemMemoryBase|0x20000000
   gArmTokenSpaceGuid.PcdSystemMemorySize|0xBFA00000
-  gArmPlatformTokenSpaceGuid.PcdSystemMemoryUefiRegionSize|0x01000000
+  gArmPlatformTokenSpaceGuid.PcdSystemMemoryUefiRegionSize|0x04000000
 
   gArmTokenSpaceGuid.PcdFdBaseAddress|0x50000000
   gArmTokenSpaceGuid.PcdFdSize|0x00100000

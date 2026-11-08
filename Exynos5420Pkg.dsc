@@ -29,9 +29,8 @@
   # Where DEBUG() bytes go.  The FrameBufferSerialPortLib always feeds
   # LogRingAppend() (UsbLogDxe streams that ring to the host PC -- that is
   # the log we read); painting them onto the panel is a separate switch in
-  # that library's INF (SERIAL_TEXT_ON_SCREEN) and stays off: the 5x12
-  # mirror garbles the boot menu.  build.sh can flip USE_* to pick another
-  # SerialPortLib (Exynos UART2, ttySAC2 @ 0x12C20000).
+  # that library's INF (SERIAL_TEXT_ON_SCREEN).  build.sh can flip USE_* to
+  # pick another SerialPortLib (Exynos UART2, ttySAC2 @ 0x12C20000).
   DEFINE USE_UART_FOR_SERIAL_OUTPUT = 0
   DEFINE USE_SCREEN_FOR_SERIAL_OUTPUT = 1
 
@@ -158,6 +157,7 @@
   # ConSplitter wires it into ConIn/ConOut, GraphicsConsole draws text.
   #
   Exynos5420Pkg/Drivers/SimpleFbDxe/SimpleFbDxe.inf
+  Exynos5420Pkg/Drivers/LogoDxe/LogoDxe.inf
   MdeModulePkg/Universal/Console/ConPlatformDxe/ConPlatformDxe.inf
   MdeModulePkg/Universal/Console/ConSplitterDxe/ConSplitterDxe.inf
   MdeModulePkg/Universal/Console/GraphicsConsoleDxe/GraphicsConsoleDxe.inf
