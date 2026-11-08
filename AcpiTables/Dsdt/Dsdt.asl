@@ -70,6 +70,22 @@ DefinitionBlock ("DSDT.aml", "DSDT", 2, "SAMSNG", "EXY5420 ", 1)
     }
 
     //
+    // microSD slot on dw_mmc channel 2 (exynossd, Storport, polled IDMAC;
+    // no interrupt).  Unlike EMMC the card is optional and UEFI only sets
+    // the slot up when one is present at boot, so the driver does the
+    // clock, pins and slot power itself.
+    //
+    Device (SDC0)
+    {
+      Name (_HID, "EXYN5017")
+      Name (_UID, 0)
+      Method (_STA) { Return (0xF) }
+      Name (_CRS, ResourceTemplate () {
+        Memory32Fixed (ReadWrite, 0x12220000, 0x00002000)
+      })
+    }
+
+    //
     // I2C0 (s3c2410-style), touchscreen bus, and hs-i2c4, S Pen bus
     // (exynosi2c, polled).  Pins and clock gates are left set up by UEFI.
     //
