@@ -529,7 +529,7 @@ CentredLine (
   IN CONST CHAR16  *Text
   )
 {
-  CHAR16  Line[256];
+  CHAR16  Line[384];   // >= L.Columns at the full 320-column mode
   UINTN   Length;
   UINTN   Start;
   UINTN   Index;
@@ -677,6 +677,44 @@ BootMenu (
       EFI_ERROR (gBS->LocateProtocol (&gEfiGraphicsOutputProtocolGuid, NULL, (VOID **)&Gop))) {
     return MenuWindows;
   }
+  //
+  // The grid math below (ScreenWidth / Columns) only matches what
+  // GraphicsConsole really paints -- 8 x 19 pixel glyph cells, the block
+  // centred with DeltaX/DeltaY -- when the active mode spans the screen
+  // (320x84 here).  In the UEFI-spec 80x25 mode the console letterboxes a
+  // 640x475 cell block into the middle of the panel, so the GOP frame and
+  // the touch cells would come out 32x64 pixels while the buttons are
+  // painted 8x19: buttons tiny, frame and touch targets four times too
+  // large and in the wrong place.  ConSplitter starts in 80x25 whenever
+  // its widest mode is not supported by every child (the serial terminal
+  // historically only knew up to 240x56), so pick the widest mode here
+  // regardless of what the boot default was.
+  //
+  {
+    UINTN  Mode;
+    UINTN  BestMode;
+    UINTN  BestColumns;
+    UINTN  BestRows;
+    UINTN  Columns;
+    UINTN  Rows;
+
+    BestMode    = (UINTN)gST->ConOut->Mode->Mode;
+    BestColumns = 0;
+    BestRows    = 0;
+    for (Mode = 0; Mode < (UINTN)gST->ConOut->Mode->MaxMode; Mode++) {
+      if (!EFI_ERROR (gST->ConOut->QueryMode (gST->ConOut, Mode, &Columns, &Rows)) &&
+          ((Columns > BestColumns) || ((Columns == BestColumns) && (Rows > BestRows))))
+      {
+        BestMode    = Mode;
+        BestColumns = Columns;
+        BestRows    = Rows;
+      }
+    }
+    if ((BestColumns > 0) && (BestMode != (UINTN)gST->ConOut->Mode->Mode)) {
+      gST->ConOut->SetMode (gST->ConOut, BestMode);
+    }
+  }
+
   if (EFI_ERROR (gST->ConOut->QueryMode (gST->ConOut, gST->ConOut->Mode->Mode, &L.Columns, &L.Rows)) ||
       (L.Columns < 40) || (L.Rows < 20)) {
     return MenuWindows;
