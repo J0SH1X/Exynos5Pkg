@@ -26,8 +26,12 @@
   SKUID_IDENTIFIER               = DEFAULT
   FLASH_DEFINITION               = Exynos5420Pkg/Exynos5420Pkg.fdf
 
-  # DEBUG() goes to the screen by default: milestone 2 watches the panel.
-  # build.sh can flip these to use the Exynos UART2 (ttySAC2 @ 0x12C20000).
+  # Where DEBUG() bytes go.  The FrameBufferSerialPortLib always feeds
+  # LogRingAppend() (UsbLogDxe streams that ring to the host PC -- that is
+  # the log we read); painting them onto the panel is a separate switch in
+  # that library's INF (SERIAL_TEXT_ON_SCREEN) and stays off: the 5x12
+  # mirror garbles the boot menu.  build.sh can flip USE_* to pick another
+  # SerialPortLib (Exynos UART2, ttySAC2 @ 0x12C20000).
   DEFINE USE_UART_FOR_SERIAL_OUTPUT = 0
   DEFINE USE_SCREEN_FOR_SERIAL_OUTPUT = 1
 
@@ -112,6 +116,8 @@
   Exynos5420Pkg/Application/CameraTestApp/CameraTestApp.inf
   Exynos5420Pkg/Application/AudioTestApp/AudioTestApp.inf
   Exynos5420Pkg/Application/SensorTestApp/SensorTestApp.inf
+  Exynos5420Pkg/Application/EmmcTestApp/EmmcTestApp.inf
+  Exynos5420Pkg/Application/PanelOffApp/PanelOffApp.inf
   Exynos5420Pkg/Application/DisplayTestApp/DisplayTestApp.inf
 
   #
@@ -155,7 +161,7 @@
   MdeModulePkg/Universal/Console/ConPlatformDxe/ConPlatformDxe.inf
   MdeModulePkg/Universal/Console/ConSplitterDxe/ConSplitterDxe.inf
   MdeModulePkg/Universal/Console/GraphicsConsoleDxe/GraphicsConsoleDxe.inf
-  MdeModulePkg/Universal/Console/TerminalDxe/TerminalDxe.inf
+  Exynos5420Pkg/Drivers/TerminalDxe/TerminalDxe.inf
   MdeModulePkg/Universal/SerialDxe/SerialDxe.inf
   MdeModulePkg/Universal/Disk/UnicodeCollation/EnglishDxe/EnglishDxe.inf
 
