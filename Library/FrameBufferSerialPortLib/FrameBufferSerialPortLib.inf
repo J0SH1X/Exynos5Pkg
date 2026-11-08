@@ -26,3 +26,10 @@
   gExynos5420PkgTokenSpaceGuid.PcdFrameBufferWidth
   gExynos5420PkgTokenSpaceGuid.PcdFrameBufferHeight
   gExynos5420PkgTokenSpaceGuid.PcdFrameBufferPixelBpp
+
+[BuildOptions]
+  # 0 = only append to the log ring (UsbLogDxe / usblog.py stream it to the
+  # host PC); 1 = additionally paint the bytes onto the framebuffer with the
+  # 5x12 font (this garbles the boot menu, so it stays 0 -- the USB log has
+  # everything the screen used to show).
+  *_*_*_CC_FLAGS = -DSERIAL_TEXT_ON_SCREEN=0

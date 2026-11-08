@@ -9,6 +9,7 @@
 #include <PiPei.h>
 
 #include <Library/CacheMaintenanceLib.h>
+#include <Library/IoLib.h>
 #include <Library/DebugAgentLib.h>
 #include <Library/PrePiLib.h>
 #include <Library/PrintLib.h>
@@ -75,6 +76,55 @@ EnableCounter()
   @param[in]  StacksBase      Start of the stack
   @param[in]  StartTimeStamp  Timer value at start of execution
 **/
+//
+// Panel off as early as possible (unattended tests on battery: the backlight
+// is the biggest consumer).  Backlight PWM dark, LP8556 held in reset and the
+// panel supply off - exactly what PanelCore.c's PwmSet (0) / PinOut do, as raw
+// MMIO so PrePi does not drag the display cores in.  FIMD and the DP link are
+// left alone: FrameBufferConfigLib reads the scan-out window back later, and
+// Windows' own display driver power-cycles the panel anyway.
+// 1 = panel dark from PrePi on (DisplayTest.efi lights it again), 0 = as the
+// bootloader left it.
+//
+#define PANEL_OFF_EARLY  0
+
+#if PANEL_OFF_EARLY
+STATIC
+VOID
+EarlyPanelOff (
+  VOID
+  )
+{
+  UINT32  Counts;
+  UINT32  Tcon;
+  UINT32  Con;
+
+  //
+  // PWM timer 0 (0x12DD0000): high all along = dark (the board inverts it).
+  //
+  Counts = MmioRead32 (0x12DD0000 + 0x0C);                // TCNTB0
+  if ((Counts < 100) || (Counts > 0xFFFF)) {
+    MmioAnd32 (0x12DD0000 + 0x00, ~0xFFu);                // prescaler /1
+    MmioAnd32 (0x12DD0000 + 0x04, ~0xFu);                 // mux /1
+    Counts = 6666 - 1;
+    MmioWrite32 (0x12DD0000 + 0x0C, Counts);
+  }
+  MmioWrite32 (0x12DD0000 + 0x10, 0);                     // TCMPB0: no low time
+  Tcon = MmioRead32 (0x12DD0000 + 0x08) & ~0xFu;
+  MmioWrite32 (0x12DD0000 + 0x08, Tcon | 0x2 | 0x8);      // manual update | auto reload
+  MmioWrite32 (0x12DD0000 + 0x08, Tcon | 0x1 | 0x8);      // start
+
+  //
+  // GPG1(1) LED_BL_RST and GPG1(2) LCD_EN (LB GPIO block 0x14000000 + 0xA0)
+  // low, as outputs.
+  //
+  MmioAnd32 (0x14000000 + 0xA0 + 0x4, ~((1u << 1) | (1u << 2)));
+  Con = MmioRead32 (0x14000000 + 0xA0);
+  Con = (Con & ~((0xFu << 4) | (0xFu << 8))) | (1u << 4) | (1u << 8);
+  MmioWrite32 (0x14000000 + 0xA0, Con);
+}
+#endif
+
 STATIC
 VOID
 PrePiMain (
@@ -92,6 +142,10 @@ PrePiMain (
 
   // Initialize the architecture specific bits
   ArchInitialize ();
+
+#if PANEL_OFF_EARLY
+  EarlyPanelOff ();
+#endif
 
   // Find the framebuffer the Samsung bootloader programmed (FIMD registers).
   // Nothing is reconfigured: we only read back what the BL set up.

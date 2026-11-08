@@ -12,6 +12,13 @@
 #include <Library/FrameBufferConfigLib.h>
 #include <ExynosLogRing.h>
 
+// DSC DEFINE SERIAL_TEXT_ON_SCREEN (FrameBufferSerialPortLib.inf [BuildOptions]):
+// 0 = LogRingAppend only (UsbLogDxe streams the ring to the host PC);
+// 1 = also paint the bytes onto the panel with the 5x12 font.
+#ifndef SERIAL_TEXT_ON_SCREEN
+#define SERIAL_TEXT_ON_SCREEN 1
+#endif
+
 FBCON_POSITION m_Position;
 FBCON_POSITION m_MaxPosition;
 FBCON_COLOR m_Color;
@@ -375,16 +382,22 @@ SerialPortWrite
 	IN UINTN     NumberOfBytes
 )
 {
-	UINT8* CONST Final = &Buffer[NumberOfBytes];
 	UINTN  InterruptState = ArmGetInterruptState();
+
 	ArmDisableInterrupts();
 
 	LogRingAppend (Buffer, NumberOfBytes);
 
-	while (Buffer < Final)
+#if SERIAL_TEXT_ON_SCREEN
 	{
-		FbConPutCharWithFactor(*Buffer++, FBCON_COMMON_MSG, SCALE_FACTOR);
+		UINT8* CONST Final = &Buffer[NumberOfBytes];
+
+		while (Buffer < Final)
+		{
+			FbConPutCharWithFactor(*Buffer++, FBCON_COMMON_MSG, SCALE_FACTOR);
+		}
 	}
+#endif
 
 	if (InterruptState) ArmEnableInterrupts();
 	return NumberOfBytes;
@@ -398,22 +411,27 @@ SerialPortWriteCritical
 	IN UINTN     NumberOfBytes
 )
 {
-	UINT8* CONST Final = &Buffer[NumberOfBytes];
-	UINTN  CurrentForeground = m_Color.Foreground;
 	UINTN  InterruptState = ArmGetInterruptState();
 
 	ArmDisableInterrupts();
 
 	LogRingAppend (Buffer, NumberOfBytes);
 
-	m_Color.Foreground = FB_BGRA8888_YELLOW;
-
-	while (Buffer < Final)
+#if SERIAL_TEXT_ON_SCREEN
 	{
-		FbConPutCharWithFactor(*Buffer++, FBCON_COMMON_MSG, SCALE_FACTOR);
-	}
+		UINT8* CONST Final = &Buffer[NumberOfBytes];
+		UINTN  CurrentForeground = m_Color.Foreground;
 
-	m_Color.Foreground = CurrentForeground;
+		m_Color.Foreground = FB_BGRA8888_YELLOW;
+
+		while (Buffer < Final)
+		{
+			FbConPutCharWithFactor(*Buffer++, FBCON_COMMON_MSG, SCALE_FACTOR);
+		}
+
+		m_Color.Foreground = CurrentForeground;
+	}
+#endif
 
 	if (InterruptState) ArmEnableInterrupts();
 	return NumberOfBytes;
